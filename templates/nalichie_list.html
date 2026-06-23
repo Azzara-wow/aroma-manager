@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Заказы с наличия — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-list-ul"></i> Все заказы с наличия</h2>
+    </div>
+    <div class="col text-end">
+        <a href="/nalichie/new" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Новый заказ
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        {% if orders %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Дата</th>
+                        <th>Закупка</th>
+                        <th>Покупатель</th>
+                        <th>Аромат</th>
+                        <th>Объём</th>
+                        <th>Цена</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td><small>{{ order.created_at[:10] if order.created_at else '—' }}</small></td>
+                        <td>
+                            {% if order.zakupka_name %}
+                            <span class="badge bg-primary">{{ order.zakupka_name }}</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">Свободный</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ order.buyer_name }}</td>
+                        <td>{{ order.aroma_name }}</td>
+                        <td>{{ order.volume_ml }} мл</td>
+                        <td>{{ "%.0f"|format(order.price) }} ₽</td>
+                        <td>
+                            {% if order.payment_nalichie %}
+                            <span class="badge bg-success">Оплачен</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Не оплачен</span>
+                            {% endif %}
+                            {% if order.upakovka %}
+                            <span class="badge bg-success">Упакован</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="/nalichie/edit/{{ order.id }}" class="btn btn-sm btn-outline-primary" title="Редактировать">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <a href="/nalichie/delete/{{ order.id }}" class="btn btn-sm btn-outline-danger"
+                               onclick="return confirm('Удалить заказ {{ order.aroma_name }} для {{ order.buyer_name }}?')" title="Удалить">
+                                <i class="bi bi-trash"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> Заказов с наличия пока нет.
+            <a href="/nalichie/new" class="alert-link">Создать первый</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+
+{% block title %}{{ zakupka.name }} — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+    <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Назад</a>
+    <h2 class="d-inline ms-3">{{ zakupka.name }}</h2>
+    {% if zakupka.status == 'active' %}
+    <span class="badge bg-success ms-2">Активна</span>
+    {% else %}
+    <span class="badge bg-secondary ms-2">Архив</span>
+    {% endif %}
+</div>
+
+<!-- Табы -->
+<ul class="nav nav-tabs mb-3" id="zakupkaTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="rozliv-tab" data-bs-toggle="tab" data-bs-target="#rozliv" type="button" role="tab">
+            🧪 Розлив
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="otpravka-tab" data-bs-toggle="tab" data-bs-target="#otpravka" type="button" role="tab">
+            📦 Отправка
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="oplata-tab" data-bs-toggle="tab" data-bs-target="#oplata" type="button" role="tab">
+            💰 Оплата
+        </button>
+    </li>
+</ul>
+
+<!-- Содержимое вкладок -->
+<div class="tab-content" id="zakupkaTabsContent">
+
+    <!-- Вкладка РОЗЛИВ -->
+    <div class="tab-pane fade show active" id="rozliv" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- Прогресс-бар -->
+                <div class="progress mb-3">
+                    <div class="progress-bar" role="progressbar"
+                         style="width: {{ rozliv_percent }}%"
+                         aria-valuenow="{{ rozliv_percent }}"
+                         aria-valuemin="0" aria-valuemax="100">
+                        {{ rozliv_done }} / {{ rozliv_total }} разлито ({{ rozliv_percent }}%)
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Аромат</th>
+                                <th>Объём (мл)</th>
+                                <th>Покупатель</th>
+                                <th>Разлито</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in rozliv_items %}
+                            <tr class="{% if item.rozliv == 1 %}table-row-done{% endif %}">
+                                <td>{{ item.aroma_name }}</td>
+                                <td>{{ item.volume_ml }}</td>
+                                <td>{{ item.buyer_name }}</td>
+                                <td>
+                                    <input type="checkbox"
+                                           class="status-checkbox rozliv-checkbox"
+                                           data-item-id="{{ item.id }}"
+                                           {% if item.rozliv == 1 %}checked{% endif %}>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Вкладка ОТПРАВКА -->
+    <div class="tab-pane fade" id="otpravka" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- Прогресс-бар -->
+                <div class="progress mb-3">
+                    <div class="progress-bar" role="progressbar"
+                         style="width: {{ otpravka_percent }}%"
+                         aria-valuenow="{{ otpravka_percent }}"
+                         aria-valuemin="0" aria-valuemax="100">
+                        {{ otpravka_done }} / {{ otpravka_total }} упаковано ({{ otpravka_percent }}%)
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Покупатель</th>
+                                <th>Позиция</th>
+                                <th>Источник</th>
+                                <th>Упаковано</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set current_buyer = namespace(name='') %}
+                            {% for item in all_otpravka %}
+                            <tr class="{% if item.upakovka == 1 %}table-row-done{% endif %}
+                                       {% if current_buyer.name != item.buyer_name and current_buyer.name != '' %}border-top border-2{% endif %}">
+                                <td>{{ item.buyer_name }}</td>
+                                <td>{{ item.aroma_name }} {{ item.volume_ml }}</td>
+                                <td>
+                                    {% if item.source == 'закупка' %}
+                                    <span class="source-badge source-zakupka">закупка</span>
+                                    {% else %}
+                                    <span class="source-badge source-nalichie">наличие</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <input type="checkbox"
+                                           class="status-checkbox upakovka-checkbox"
+                                           data-item-id="{{ item.id }}"
+                                           data-source="{{ item.source }}"
+                                           {% if item.upakovka == 1 %}checked{% endif %}>
+                                </td>
+                            </tr>
+                            {% set current_buyer.name = item.buyer_name %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Вкладка ОПЛАТА -->
+    <div class="tab-pane fade" id="oplata" role="tabpanel">
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>Оплата закупки:</strong>
+                        <div class="progress">
+                            <div class="progress-bar bg-success" role="progressbar"
+                                 style="width: {{ payment_zakupka_percent }}%">
+                                {{ paid_zakupka }} / {{ total_buyers }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Отправлено:</strong>
+                        <div class="progress">
+                            <div class="progress-bar bg-info" role="progressbar"
+                                 style="width: {{ shipped_percent }}%">
+                                {{ shipped_count }} / {{ total_buyers }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Покупатель</th>
+                                <th>Сумма закупки</th>
+                                <th>Оплата закупки</th>
+                                <th>Сумма наличия</th>
+                                <th>Оплата наличия</th>
+                                <th>Телефон</th>
+                                <th>Адрес</th>
+                                <th>Отправлено</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for buyer_name, data in buyers_summary %}
+                            <tr>
+                                <td><strong>{{ buyer_name }}</strong></td>
+                                <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
+                                <td>
+                                    {% if data.sum_zakupka > 0 %}
+                                    <input type="checkbox"
+                                           class="status-checkbox payment-zakupka-checkbox"
+                                           data-buyer="{{ buyer_name }}"
+                                           {% if data.payment_zakupka == 1 %}checked{% endif %}>
+                                    {% else %}
+                                    —
+                                    {% endif %}
+                                </td>
+                                <td>{{ "%.0f"|format(data.sum_nalichie) if data.sum_nalichie else "—" }}</td>
+                                <td>
+                                    {% if data.sum_nalichie > 0 %}
+                                    <input type="checkbox"
+                                           class="status-checkbox payment-nalichie-checkbox"
+                                           data-buyer="{{ buyer_name }}"
+                                           {% if data.payment_nalichie == 1 %}checked{% endif %}>
+                                    {% else %}
+                                    —
+                                    {% endif %}
+                                </td>
+                                <td>{{ data.phone }}</td>
+                                <td><small>{{ data.address }}</small></td>
+                                <td>
+                                    <input type="checkbox"
+                                           class="status-checkbox shipped-checkbox"
+                                           data-buyer="{{ buyer_name }}"
+                                           {% if data.shipped == 1 %}checked{% endif %}>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// === Универсальный обработчик ===
+async function handleCheckbox(checkbox, url, body = null) {
+    const original = checkbox.checked;
+    checkbox.disabled = true;
+    try {
+        const opts = { method: 'POST' };
+        if (body) opts.body = body;
+        const resp = await fetch(url, opts);
+        const data = await resp.json();
+        if (data.ok) {
+            // визуальное выделение строки
+            const row = checkbox.closest('tr');
+            if (row) {
+                if (data.new_value) row.classList.add('table-row-done');
+                else row.classList.remove('table-row-done');
+            }
+            // Обновляем все прогресс-бары на странице
+            refreshAllProgressBars();
+        } else {
+            checkbox.checked = original;
+            alert('Ошибка сохранения');
+        }
+    } catch (e) {
+        console.error(e);
+        checkbox.checked = original;
+        alert('Сетевая ошибка');
+    } finally {
+        checkbox.disabled = false;
+    }
+}
+
+function refreshAllProgressBars() {
+    // Розлив
+    const rozlivCheckboxes = document.querySelectorAll('#rozliv .rozliv-checkbox');
+    const rozlivChecked = document.querySelectorAll('#rozliv .rozliv-checkbox:checked');
+    updateBar('#rozliv .progress-bar', rozlivChecked.length, rozlivCheckboxes.length);
+
+    // Отправка
+    const otprCheckboxes = document.querySelectorAll('#otpravka .upakovka-checkbox');
+    const otprChecked = document.querySelectorAll('#otpravka .upakovka-checkbox:checked');
+    updateBar('#otpravka .progress-bar', otprChecked.length, otprCheckboxes.length);
+
+    // Оплата – два прогресс-бара
+    const payZakupkaChecks = document.querySelectorAll('.payment-zakupka-checkbox:checked');
+    const allPayZakupkaChecks = document.querySelectorAll('.payment-zakupka-checkbox');
+    const shippedChecks = document.querySelectorAll('.shipped-checkbox:checked');
+    const allShippedChecks = document.querySelectorAll('.shipped-checkbox');
+
+    // Находим прогресс-бары во вкладке Оплата
+    const paymentBars = document.querySelectorAll('#oplata .progress-bar');
+    if (paymentBars.length >= 2) {
+        // Первый бар – оплата закупки
+        updateBarDirect(paymentBars[0], payZakupkaChecks.length, allPayZakupkaChecks.length);
+        // Второй бар – отправлено
+        updateBarDirect(paymentBars[1], shippedChecks.length, allShippedChecks.length);
+    }
+}
+
+function updateBar(selector, done, total) {
+    const bar = document.querySelector(selector);
+    if (!bar) return;
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    bar.style.width = percent + '%';
+    bar.setAttribute('aria-valuenow', percent);
+    bar.textContent = done + ' / ' + total + ' (' + percent + '%)';
+}
+
+function updateBarDirect(bar, done, total) {
+    if (!bar) return;
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    bar.style.width = percent + '%';
+    bar.setAttribute('aria-valuenow', percent);
+    bar.textContent = done + ' / ' + total + ' (' + percent + '%)';
+}
+
+// === Привязка событий ===
+document.addEventListener('DOMContentLoaded', function() {
+    // Розлив
+    document.querySelectorAll('.rozliv-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => handleCheckbox(cb, `/api/status/rozliv/${cb.dataset.itemId}`));
+    });
+    // Отправка
+    document.querySelectorAll('.upakovka-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => handleCheckbox(cb, `/api/status/upakovka/${cb.dataset.itemId}?source=${cb.dataset.source}`));
+    });
+    // Оплата закупки
+    document.querySelectorAll('.payment-zakupka-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const formData = new FormData();
+            formData.append('zakupka_id', '{{ zakupka.id }}');
+            handleCheckbox(cb, `/api/status/payment-zakupka/${encodeURIComponent(cb.dataset.buyer)}`, formData);
+        });
+    });
+    // Оплата наличия
+    document.querySelectorAll('.payment-nalichie-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const formData = new FormData();
+            formData.append('zakupka_id', '{{ zakupka.id }}');
+            handleCheckbox(cb, `/api/status/payment-nalichie/${encodeURIComponent(cb.dataset.buyer)}`, formData);
+        });
+    });
+    // Отправлено
+    document.querySelectorAll('.shipped-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const formData = new FormData();
+            formData.append('zakupka_id', '{{ zakupka.id }}');
+            handleCheckbox(cb, `/api/status/shipped/${encodeURIComponent(cb.dataset.buyer)}`, formData);
+        });
+    });
+
+    // Первоначальное обновление баров
+    refreshAllProgressBars();
+});
+</script>
+{% endblock %}

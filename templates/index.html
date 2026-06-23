@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-speedometer2"></i> Дашборд</h2>
+    </div>
+    <div class="col text-end">
+        <a href="/zakupka/new" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Новая закупка</a>
+        <a href="/nalichie/new" class="btn btn-outline-primary"><i class="bi bi-box"></i> Заказ с наличия</a>
+    </div>
+</div>
+
+<!-- Активные закупки -->
+<h4 class="mb-3">📦 Активные закупки</h4>
+{% if active_zakupkas %}
+<div class="row">
+    {% for zakupka in active_zakupkas %}
+    <div class="col-md-4 mb-3">
+        <div class="card dashboard-card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">{{ zakupka.name }}</h5>
+                <p class="card-text text-muted">
+                    <i class="bi bi-box-seam"></i> {{ zakupka.item_count }} позиций<br>
+                    <i class="bi bi-calendar"></i> {{ zakupka.created_at[:10] }}
+                </p>
+                <div class="d-flex justify-content-between">
+                    <a href="/zakupka/{{ zakupka.id }}" class="btn btn-primary btn-sm">
+                        <i class="bi bi-eye"></i> Открыть
+                    </a>
+                    <form method="POST" action="/zakupka/{{ zakupka.id }}/close" class="d-inline">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm" onclick="return confirm('Перевести в архив?')">
+                            <i class="bi bi-archive"></i> В архив
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Нет активных закупок. <a href="/zakupka/new" class="alert-link">Создать новую</a>
+</div>
+{% endif %}
+
+<!-- Архив -->
+{% if closed_zakupkas %}
+<h4 class="mb-3 mt-4">📁 Архив</h4>
+<div class="row">
+    {% for zakupka in closed_zakupkas %}
+    <div class="col-md-3 mb-3">
+        <div class="card dashboard-card shadow-sm border-secondary">
+            <div class="card-body">
+                <h6 class="card-title">{{ zakupka.name }}</h6>
+                <p class="card-text text-muted small">
+                    <i class="bi bi-box-seam"></i> {{ zakupka.item_count }} позиций
+                </p>
+                <div class="d-flex justify-content-between">
+                    <a href="/zakupka/{{ zakupka.id }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-eye"></i> Смотреть
+                    </a>
+                    <form method="POST" action="/zakupka/{{ zakupka.id }}/reopen" class="d-inline">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-repeat"></i> Восстановить
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

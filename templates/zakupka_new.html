@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Новая закупка — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <h2><i class="bi bi-plus-circle"></i> Новая закупка</h2>
+
+        {% if error %}
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> {{ error }}
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Название закупки</label>
+                        <input type="text" class="form-control" id="name" name="name"
+                               placeholder="Например: Май 2026" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="sheet_url" class="form-label">Ссылка на Google Sheets</label>
+                        <input type="url" class="form-control" id="sheet_url" name="sheet_url"
+                               placeholder="https://docs.google.com/spreadsheets/d/..." required>
+                        <div class="form-text">
+                            Вставь полную ссылку на гугл-таблицу с заказами.<br>
+                            Ожидаемые колонки: <strong>Имя покупателя, Название аромата, Объём (мл), Цена за 10мл, Сумма</strong>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-cloud-download"></i> Импортировать
+                    </button>
+                    <a href="/" class="btn btn-outline-secondary">Отмена</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Покупатели — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-people"></i> Покупатели</h2>
+    </div>
+    <div class="col text-end">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addBuyerModal">
+            <i class="bi bi-person-plus"></i> Добавить покупателя
+        </button>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        {% if buyers %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Телефон</th>
+                        <th>Отчество</th>
+                        <th>Адрес ПВЗ</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for buyer in buyers %}
+                    <tr>
+                        <td><strong>{{ buyer.name }}</strong></td>
+                        <td>{{ buyer.phone or '—' }}</td>
+                        <td>{{ buyer.middle_name or '—' }}</td>
+                        <td><small>{{ buyer.address or '—' }}</small></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#editBuyerModal{{ buyer.id }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <a href="/buyers/delete/{{ buyer.id }}"
+                               class="btn btn-sm btn-outline-danger"
+                               onclick="return confirm('Удалить покупателя {{ buyer.name }}?')">
+                                <i class="bi bi-trash"></i>
+                            </a>
+                        </td>
+                    </tr>
+
+                    <!-- Модальное окно редактирования -->
+                    <div class="modal fade" id="editBuyerModal{{ buyer.id }}" tabindex="-1">
+                        <div class="modal-dialog">
+                            <div class="modal-content">
+                                <form method="POST" action="/buyers/edit/{{ buyer.id }}">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Редактировать: {{ buyer.name }}</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <div class="mb-3">
+                                            <label class="form-label">Имя и фамилия</label>
+                                            <input type="text" class="form-control" name="name" value="{{ buyer.name }}" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Отчество</label>
+                                            <input type="text" class="form-control" name="middle_name" value="{{ buyer.middle_name or '' }}">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Телефон</label>
+                                            <input type="text" class="form-control" name="phone" value="{{ buyer.phone or '' }}">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Адрес ПВЗ</label>
+                                            <textarea class="form-control" name="address" rows="2">{{ buyer.address or '' }}</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                                        <button type="submit" class="btn btn-primary">Сохранить</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> Пока нет покупателей. Они будут добавляться автоматически при импорте закупок.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Модальное окно добавления -->
+<div class="modal fade" id="addBuyerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/buyers/add">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новый покупатель</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Имя и фамилия <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="name" required
+                               placeholder="Иванова Анна">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Отчество</label>
+                        <input type="text" class="form-control" name="middle_name"
+                               placeholder="Ивановна">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Телефон</label>
+                        <input type="text" class="form-control" name="phone"
+                               placeholder="+7 9XX XXX-XX-XX">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Адрес ПВЗ</label>
+                        <textarea class="form-control" name="address" rows="2"
+                                  placeholder="СДЭК ул. Мира, 5"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Новый заказ с наличия — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <h2><i class="bi bi-box"></i> Новый заказ с наличия</h2>
+        <p class="text-muted">Когда покупатель дозаказывает что-то с нашего склада</p>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="zakupka_id" class="form-label">Привязать к закупке</label>
+                        <select class="form-select" id="zakupka_id" name="zakupka_id">
+                            <option value="none">Без привязки (свободный заказ)</option>
+                            {% for zakupka in zakupkas %}
+                            <option value="{{ zakupka.id }}">{{ zakupka.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Если заказ связан с активной закупкой — выбери её</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="buyer_name" class="form-label">Покупатель</label>
+                        <select class="form-select" id="buyer_name" name="buyer_name" required>
+                            <option value="">Выбери покупателя...</option>
+                            {% for buyer in buyers %}
+                            <option value="{{ buyer.name }}">{{ buyer.name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if not buyers %}
+                        <div class="form-text text-warning">
+                            <i class="bi bi-exclamation-triangle"></i> Сначала добавь покупателей в разделе «Покупатели»
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="aroma_name" class="form-label">Название аромата</label>
+                        <input type="text" class="form-control" id="aroma_name" name="aroma_name"
+                               placeholder="Dolce Dolce" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="volume_ml" class="form-label">Объём (мл)</label>
+                            <input type="number" class="form-control" id="volume_ml" name="volume_ml"
+                                   value="10" min="1" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="price" class="form-label">Цена (руб)</label>
+                            <input type="number" class="form-control" id="price" name="price"
+                                   step="0.01" required placeholder="350.00">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Добавить заказ
+                    </button>
+                    <a href="/" class="btn btn-outline-secondary">Отмена</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

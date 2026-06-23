@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать заказ наличия — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <h2><i class="bi bi-pencil"></i> Редактировать заказ наличия</h2>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST" action="/nalichie/edit/{{ order.id }}">
+                    <div class="mb-3">
+                        <label for="zakupka_id" class="form-label">Привязать к закупке</label>
+                        <select class="form-select" id="zakupka_id" name="zakupka_id">
+                            <option value="none" {% if not order.zakupka_id %}selected{% endif %}>Без привязки (свободный заказ)</option>
+                            {% for zakupka in zakupkas %}
+                            <option value="{{ zakupka.id }}" {% if order.zakupka_id == zakupka.id %}selected{% endif %}>
+                                {{ zakupka.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="buyer_name" class="form-label">Покупатель</label>
+                        <select class="form-select" id="buyer_name" name="buyer_name" required>
+                            <option value="">Выбери покупателя...</option>
+                            {% for buyer in buyers %}
+                            <option value="{{ buyer.name }}" {% if buyer.name == order.buyer_name %}selected{% endif %}>
+                                {{ buyer.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="aroma_name" class="form-label">Название аромата</label>
+                        <input type="text" class="form-control" id="aroma_name" name="aroma_name"
+                               value="{{ order.aroma_name }}" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="volume_ml" class="form-label">Объём (мл)</label>
+                            <input type="number" class="form-control" id="volume_ml" name="volume_ml"
+                                   value="{{ order.volume_ml }}" min="1" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="price" class="form-label">Цена (руб)</label>
+                            <input type="number" class="form-control" id="price" name="price"
+                                   step="0.01" value="{{ order.price }}" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> Сохранить
+                    </button>
+                    <a href="/nalichie" class="btn btn-outline-secondary">Отмена</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
