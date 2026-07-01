@@ -78,42 +78,61 @@
         .dashboard-card:hover {
             transform: translateY(-2px);
         }
+
+        .zakupka-table {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        @media (max-width: 768px) {
+            body { padding-top:10px; }
+            .container-fluid { padding-left:8px; padding-right:8px; }
+            .navbar { margin-bottom:10px !important; padding:.5rem .75rem !important; }
+            .navbar-brand { font-size:1rem; }
+            h2 { font-size:1.3rem; margin-bottom:.5rem; }
+            .btn { padding:.35rem .6rem; font-size:.9rem; }
+            .nav-tabs { display:flex; flex-wrap:nowrap; }
+            .nav-tabs .nav-item { flex:1; }
+            .nav-tabs .nav-link {
+                width:100%;
+                text-align:center;
+                padding:.5rem .25rem;
+                font-size:.9rem;
+            }
+            .table { font-size:.82rem; }
+            .table th, .table td {
+                padding:.35rem !important;
+                white-space:nowrap;
+                vertical-align:middle;
+            }
+            .status-checkbox { width:28px; height:28px; }
+            .progress { height:22px; }
+            .progress-bar { font-size:.75rem; line-height:22px; }
+            .source-badge { font-size:.6rem; padding:2px 5px; }
+            .zakupka-table { max-height:none; }
+        }
     </style>
 </head>
 <body>
-    <div class="container-fluid">
-        <!-- Навигация -->
-        <nav class="navbar navbar-expand-lg navbar-light bg-white rounded shadow-sm mb-4 px-3">
-            <a class="navbar-brand" href="/">🌸 Менеджер закупок Luzi</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> Дашборд</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/zakupka/new"><i class="bi bi-plus-circle"></i> Новая закупка</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/nalichie/new"><i class="bi bi-box"></i> + Наличие</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/nalichie"><i class="bi bi-list-ul"></i> Заказы наличия</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/buyers"><i class="bi bi-people"></i> Покупатели</a>
-                    </li>
-                </ul>
-            </div>
-        </nav>
-
-        <!-- Основной контент -->
-        {% block content %}{% endblock %}
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    {% block scripts %}{% endblock %}
+<div class="container-fluid">
+<nav class="navbar navbar-expand-lg navbar-light bg-white rounded shadow-sm mb-4 px-3">
+<a class="navbar-brand" href="/">🌸 Менеджер закупок Luzi</a>
+<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+<span class="navbar-toggler-icon"></span>
+</button>
+<div class="collapse navbar-collapse" id="navbarNav">
+<ul class="navbar-nav ms-auto">
+<li class="nav-item"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> Дашборд</a></li>
+<li class="nav-item"><a class="nav-link" href="/zakupka/new"><i class="bi bi-plus-circle"></i> Новая закупка</a></li>
+<li class="nav-item"><a class="nav-link" href="/nalichie/new"><i class="bi bi-box"></i> + Наличие</a></li>
+<li class="nav-item"><a class="nav-link" href="/nalichie"><i class="bi bi-list-ul"></i> Заказы наличия</a></li>
+<li class="nav-item"><a class="nav-link" href="/buyers"><i class="bi bi-people"></i> Покупатели</a></li>
+</ul>
+</div>
+</nav>
+{% block content %}{% endblock %}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>
