@@ -111,7 +111,35 @@
             .source-badge { font-size:.6rem; padding:2px 5px; }
             .zakupka-table { max-height:none; }
         }
-    </style>
+    
+
+/* ================= МОБИЛЬНЫЕ ТАБЛИЦЫ ================= */
+
+@media (max-width: 768px) {
+
+    /* Розлив */
+    #rozliv th:nth-child(3),
+    #rozliv td:nth-child(3) {
+        display: none;
+    }
+
+    /* Отправка */
+    #otpravka th:nth-child(3),
+    #otpravka td:nth-child(3) {
+        display: none;
+    }
+
+    /* Оплата */
+    #oplata th:nth-child(6),
+    #oplata td:nth-child(6),
+    #oplata th:nth-child(7),
+    #oplata td:nth-child(7) {
+        display: none;
+    }
+
+}
+
+</style>
 </head>
 <body>
 <div class="container-fluid">

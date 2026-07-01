@@ -3,6 +3,66 @@
 {% block title %}{{ zakupka.name }} — Менеджер закупок Luzi{% endblock %}
 
 {% block content %}
+
+<style>
+@media (max-width:768px){
+
+    /* ---------- Розлив ---------- */
+
+    #rozliv table{
+        table-layout:fixed;
+        width:100%;
+    }
+
+    #rozliv th:nth-child(1),
+    #rozliv td:nth-child(1){
+        width:65%;
+        white-space:normal !important;
+        word-break:break-word;
+    }
+
+    #rozliv th:nth-child(2),
+    #rozliv td:nth-child(2){
+        width:15%;
+        text-align:center;
+    }
+
+    #rozliv th:nth-child(4),
+    #rozliv td:nth-child(4){
+        width:20%;
+        text-align:center;
+    }
+
+    /* ---------- Отправка ---------- */
+
+    #otpravka table{
+        table-layout:fixed;
+        width:100%;
+    }
+
+    #otpravka th:nth-child(2),
+    #otpravka td:nth-child(2){
+        width:65%;
+        white-space:normal !important;
+        word-break:break-word;
+    }
+
+    #otpravka th:nth-child(1),
+    #otpravka td:nth-child(1){
+        width:20%;
+        white-space:normal !important;
+        word-break:break-word;
+    }
+
+    #otpravka th:nth-child(4),
+    #otpravka td:nth-child(4){
+        width:15%;
+        text-align:center;
+    }
+
+}
+</style>
+
 <div class="mb-3">
     <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Назад</a>
     <h2 class="d-inline ms-3">{{ zakupka.name }}</h2>
