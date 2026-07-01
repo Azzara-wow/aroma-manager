@@ -159,7 +159,8 @@
                         <thead>
                             <tr>
                                 <th>Покупатель</th>
-                                <th>Позиция</th>
+                                <th>Аромат</th>
+                                <th>мл</th>
                                 <th>Источник</th>
                                 <th>Упаковано</th>
                             </tr>
@@ -170,7 +171,9 @@
                             <tr class="{% if item.upakovka == 1 %}table-row-done{% endif %}
                                        {% if current_buyer.name != item.buyer_name and current_buyer.name != '' %}border-top border-2{% endif %}">
                                 <td>{{ item.buyer_name }}</td>
-                                <td>{{ item.aroma_name }} {{ item.volume_ml }}</td>
+                                <td>{{ item.aroma_name }}</td>
+                                <td>{{ item.volume_ml }}</td>
+
                                 <td>
                                     {% if item.source == 'закупка' %}
                                     <span class="source-badge source-zakupka">закупка</span>
@@ -178,6 +181,7 @@
                                     <span class="source-badge source-nalichie">наличие</span>
                                     {% endif %}
                                 </td>
+
                                 <td>
                                     <input type="checkbox"
                                            class="status-checkbox upakovka-checkbox"

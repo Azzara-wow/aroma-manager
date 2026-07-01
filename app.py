@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 import pandas as pd
 from urllib.parse import urlparse, parse_qs
 import sqlite3
@@ -8,10 +9,10 @@ from datetime import datetime
 import os
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 from models import get_db, init_db
-
 
 # === Функция для получения CSV из Google Sheets ===
 def make_csv_url(sheet_url: str) -> str:

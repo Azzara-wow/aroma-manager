@@ -1,0 +1,192 @@
+/* =====================================================
+   Aroma Manager
+   Мобильная версия
+   ===================================================== */
+
+@media (max-width:768px){
+
+    body{
+        padding-top:10px;
+    }
+
+    .container-fluid{
+        padding-left:8px;
+        padding-right:8px;
+    }
+
+    /* ---------- Навигация ---------- */
+
+    .navbar{
+        margin-bottom:10px !important;
+        padding:.5rem .75rem !important;
+    }
+
+    .navbar-brand{
+        font-size:1rem;
+    }
+
+    /* ---------- Заголовки ---------- */
+
+    h2{
+        font-size:1.3rem;
+        margin-bottom:.5rem;
+    }
+
+    /* ---------- Кнопки ---------- */
+
+    .btn{
+        padding:.35rem .6rem;
+        font-size:.9rem;
+    }
+
+    /* ---------- Вкладки ---------- */
+
+    .nav-tabs{
+        display:flex;
+        flex-wrap:nowrap;
+    }
+
+    .nav-tabs .nav-item{
+        flex:1;
+    }
+
+    .nav-tabs .nav-link{
+        width:100%;
+        text-align:center;
+        padding:.5rem .25rem;
+        font-size:.9rem;
+    }
+
+    /* ---------- Таблицы ---------- */
+
+    .zakupka-table{
+        max-height:none;
+    }
+
+    .table{
+        font-size:.82rem;
+    }
+
+    .table th,
+    .table td{
+        padding:.35rem !important;
+        vertical-align:middle;
+    }
+
+    /* ---------- Чекбоксы ---------- */
+
+    .status-checkbox{
+        width:30px;
+        height:30px;
+    }
+
+    /* ---------- Progress ---------- */
+
+    .progress{
+        height:22px;
+    }
+
+    .progress-bar{
+        font-size:.75rem;
+        line-height:22px;
+    }
+
+    /* ---------- Бейджи ---------- */
+
+    .source-badge{
+        font-size:.6rem;
+        padding:2px 5px;
+    }
+
+/* =====================================================
+   РОЗЛИВ
+   ===================================================== */
+
+#rozliv table{
+    table-layout:fixed;
+    width:100%;
+}
+
+#rozliv th:nth-child(1),
+#rozliv td:nth-child(1){
+    width:65%;
+    white-space:normal !important;
+    word-break:break-word;
+}
+
+#rozliv th:nth-child(2),
+#rozliv td:nth-child(2){
+    width:15%;
+    text-align:center;
+}
+
+/* Скрываем колонку "Покупатель" */
+
+#rozliv th:nth-child(3),
+#rozliv td:nth-child(3){
+    display:none;
+}
+
+#rozliv th:nth-child(4),
+#rozliv td:nth-child(4){
+    width:20%;
+    text-align:center;
+}
+
+    /* =====================================================
+       ОТПРАВКА
+       ===================================================== */
+
+/* =====================================================
+   ОТПРАВКА
+   ===================================================== */
+
+#otpravka table{
+    table-layout:fixed;
+    width:100%;
+}
+
+#otpravka th:nth-child(1),
+#otpravka td:nth-child(1){
+    width:22%;
+    white-space:normal !important;
+    word-break:break-word;
+}
+
+#otpravka th:nth-child(2),
+#otpravka td:nth-child(2){
+    width:48%;
+    white-space:normal !important;
+    word-break:break-word;
+}
+
+#otpravka th:nth-child(3),
+#otpravka td:nth-child(3){
+    width:10%;
+    text-align:center;
+}
+
+#otpravka th:nth-child(4),
+#otpravka td:nth-child(4){
+    display:none;
+}
+
+#otpravka th:nth-child(5),
+#otpravka td:nth-child(5){
+    width:20%;
+    text-align:center;
+}
+
+    /* =====================================================
+       ОПЛАТА
+       ===================================================== */
+
+    #oplata th:nth-child(6),
+    #oplata td:nth-child(6),
+
+    #oplata th:nth-child(7),
+    #oplata td:nth-child(7){
+        display:none;
+    }
+
+}

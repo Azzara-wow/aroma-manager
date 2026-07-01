@@ -1,0 +1,116 @@
+/* =====================================================
+   Aroma Manager
+   Основные стили (ПК + общие)
+   ===================================================== */
+
+body {
+    padding-top: 20px;
+    background-color: #f8f9fa;
+}
+
+/* ---------- Навигация ---------- */
+
+.navbar-brand {
+    font-weight: bold;
+    color: #6f42c1 !important;
+}
+
+/* ---------- Кнопки ---------- */
+
+.btn-primary {
+    background-color: #6f42c1;
+    border-color: #6f42c1;
+}
+
+.btn-primary:hover {
+    background-color: #5a32a8;
+    border-color: #5a32a8;
+}
+
+.btn-success {
+    background-color: #28a745;
+}
+
+/* ---------- Таблицы ---------- */
+
+.table th {
+    background-color: #f1f0ff;
+    position: sticky;
+    top: 0;
+}
+
+.table-hover tbody tr:hover {
+    background-color: #f5f0ff;
+}
+
+.table-row-done {
+    background-color: #f0fff0 !important;
+}
+
+/* ---------- Чекбоксы ---------- */
+
+.status-checkbox {
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    accent-color: #6f42c1;
+}
+
+/* ---------- Progress ---------- */
+
+.progress {
+    height: 25px;
+    margin: 10px 0;
+}
+
+.progress-bar {
+    background-color: #6f42c1;
+    font-size: 14px;
+    line-height: 25px;
+}
+
+/* ---------- Вкладки ---------- */
+
+.nav-tabs .nav-link {
+    color: #495057;
+}
+
+.nav-tabs .nav-link.active {
+    border-bottom: 3px solid #6f42c1;
+    font-weight: bold;
+}
+
+/* ---------- Бейджи ---------- */
+
+.source-badge {
+    font-size: 0.7em;
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+.source-zakupka {
+    background: #d4edda;
+    color: #155724;
+}
+
+.source-nalichie {
+    background: #fff3cd;
+    color: #856404;
+}
+
+/* ---------- Dashboard ---------- */
+
+.dashboard-card {
+    transition: transform .2s;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-2px);
+}
+
+/* ---------- Общие контейнеры ---------- */
+
+.zakupka-table {
+    max-height: 600px;
+    overflow-y: auto;
+}
