@@ -40,3 +40,9 @@ staticfiles/
 # OS
 .DS_Store
 Thumbs.db
+
+data.db
+data_backup_*.db
+__pycache__/
+.venv/
+.idea/

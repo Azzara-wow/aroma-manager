@@ -61,6 +61,19 @@
     }
 
 }
+
+/* ---------- Подсветка выполненных строк (розлив/упаковка) ---------- */
+.table-row-done > td{
+    background-color:#e6f4ea !important;  /* мягкий зелёный */
+}
+.table-row-done > td:first-child{
+    box-shadow:inset 3px 0 0 #34a853;     /* акцентная полоска слева */
+}
+/* плавное появление/исчезновение при клике по галочке */
+#rozliv tbody tr > td,
+#otpravka tbody tr > td{
+    transition:background-color .18s ease;
+}
 </style>
 
 <div class="mb-3">
@@ -186,7 +199,7 @@
                                     <input type="checkbox"
                                            class="status-checkbox upakovka-checkbox"
                                            data-item-id="{{ item.id }}"
-                                           data-source="{{ item.source }}"
+                                           data-source="{% if item.source == 'закупка' %}zakupka{% else %}nalichie{% endif %}"
                                            {% if item.upakovka == 1 %}checked{% endif %}>
                                 </td>
                             </tr>

@@ -41,11 +41,16 @@
                                     data-bs-target="#editBuyerModal{{ buyer.id }}">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <a href="/buyers/delete/{{ buyer.id }}"
-                               class="btn btn-sm btn-outline-danger"
-                               onclick="return confirm('Удалить покупателя {{ buyer.name }}?')">
-                                <i class="bi bi-trash"></i>
-                            </a>
+                            <!-- Удаление через POST-форму, а не ссылку.
+                                 Раньше тут была <a href="/buyers/delete/..">, и боты/прелоадеры
+                                 дёргали её GET-запросом, молча удаляя покупателей. Теперь только POST. -->
+                            <form method="POST" action="/buyers/delete/{{ buyer.id }}"
+                                  style="display:inline"
+                                  onsubmit="return confirm('Удалить покупателя {{ buyer.name }}?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
                         </td>
                     </tr>
 

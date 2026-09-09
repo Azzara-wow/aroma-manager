@@ -8,61 +8,127 @@
         <h2><i class="bi bi-box"></i> Новый заказ с наличия</h2>
         <p class="text-muted">Когда покупатель дозаказывает что-то с нашего склада</p>
 
-        <div class="card shadow-sm">
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        <!-- Общая привязка к закупке (действует и для одиночного, и для массового) -->
+        <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label for="zakupka_id" class="form-label">Привязать к закупке</label>
-                        <select class="form-select" id="zakupka_id" name="zakupka_id">
-                            <option value="none">Без привязки (свободный заказ)</option>
-                            {% for zakupka in zakupkas %}
-                            <option value="{{ zakupka.id }}">{{ zakupka.name }}</option>
-                            {% endfor %}
-                        </select>
-                        <div class="form-text">Если заказ связан с активной закупкой — выбери её</div>
-                    </div>
+                <label for="zakupka_id_shared" class="form-label">Привязать к закупке</label>
+                <select class="form-select" id="zakupka_id_shared" name="zakupka_id_shared"
+                        onchange="syncZakupka(this.value)">
+                    <option value="none">Без привязки (свободный заказ)</option>
+                    {% for zakupka in zakupkas %}
+                    <option value="{{ zakupka.id }}">{{ zakupka.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Применяется ко всем заказам ниже — и к одиночному, и к списку</div>
+            </div>
+        </div>
 
-                    <div class="mb-3">
-                        <label for="buyer_name" class="form-label">Покупатель</label>
-                        <select class="form-select" id="buyer_name" name="buyer_name" required>
-                            <option value="">Выбери покупателя...</option>
-                            {% for buyer in buyers %}
-                            <option value="{{ buyer.name }}">{{ buyer.name }}</option>
-                            {% endfor %}
-                        </select>
-                        {% if not buyers %}
-                        <div class="form-text text-warning">
-                            <i class="bi bi-exclamation-triangle"></i> Сначала добавь покупателей в разделе «Покупатели»
-                        </div>
-                        {% endif %}
-                    </div>
+        <!-- Вкладки: один заказ / список -->
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-single-btn" data-bs-toggle="tab"
+                        data-bs-target="#tab-single" type="button" role="tab">
+                    <i class="bi bi-plus-circle"></i> Один заказ
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-bulk-btn" data-bs-toggle="tab"
+                        data-bs-target="#tab-bulk" type="button" role="tab">
+                    <i class="bi bi-list-ul"></i> Список
+                </button>
+            </li>
+        </ul>
 
-                    <div class="mb-3">
-                        <label for="aroma_name" class="form-label">Название аромата</label>
-                        <input type="text" class="form-control" id="aroma_name" name="aroma_name"
-                               placeholder="Dolce Dolce" required>
-                    </div>
+        <div class="tab-content">
+            <!-- === ОДИН ЗАКАЗ === -->
+            <div class="tab-pane fade show active" id="tab-single" role="tabpanel">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <form method="POST" action="/nalichie/new">
+                            <input type="hidden" name="zakupka_id" id="zakupka_id_single" value="none">
 
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="volume_ml" class="form-label">Объём (мл)</label>
-                            <input type="number" class="form-control" id="volume_ml" name="volume_ml"
-                                   value="10" min="1" required>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="price" class="form-label">Цена (руб)</label>
-                            <input type="number" class="form-control" id="price" name="price"
-                                   step="0.01" required placeholder="350.00">
-                        </div>
-                    </div>
+                            <div class="mb-3">
+                                <label for="buyer_name" class="form-label">Покупатель</label>
+                                <select class="form-select" id="buyer_name" name="buyer_name" required>
+                                    <option value="">Выбери покупателя...</option>
+                                    {% for buyer in buyers %}
+                                    <option value="{{ buyer.name }}">{{ buyer.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if not buyers %}
+                                <div class="form-text text-warning">
+                                    <i class="bi bi-exclamation-triangle"></i> Сначала добавь покупателей в разделе «Покупатели»
+                                </div>
+                                {% endif %}
+                            </div>
 
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-plus-circle"></i> Добавить заказ
-                    </button>
-                    <a href="/" class="btn btn-outline-secondary">Отмена</a>
-                </form>
+                            <div class="mb-3">
+                                <label for="aroma_name" class="form-label">Название аромата</label>
+                                <input type="text" class="form-control" id="aroma_name" name="aroma_name"
+                                       placeholder="Dolce Dolce" required>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="volume_ml" class="form-label">Объём (мл)</label>
+                                    <input type="number" class="form-control" id="volume_ml" name="volume_ml"
+                                           value="10" min="1" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="price" class="form-label">Цена (руб)</label>
+                                    <input type="number" class="form-control" id="price" name="price"
+                                           step="0.01" required placeholder="350.00">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Добавить заказ
+                            </button>
+                            <a href="/" class="btn btn-outline-secondary">Отмена</a>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === СПИСОК === -->
+            <div class="tab-pane fade" id="tab-bulk" role="tabpanel">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <form method="POST" action="/nalichie/new-bulk">
+                            <input type="hidden" name="zakupka_id" id="zakupka_id_bulk" value="none">
+
+                            <div class="mb-3">
+                                <label for="bulk_text" class="form-label">Список заказов</label>
+                                <textarea class="form-control" id="bulk_text" name="bulk_text" rows="12"
+                                          placeholder="Каждый заказ — с новой строки, поля через ; или запятую:&#10;Покупатель; Аромат; Объём; Цена&#10;&#10;Анна Иванова; Dolce Dolce; 10; 350&#10;Мария П; Baccarat Rouge; 30; 900&#10;Ольга; Aventus; 10; 400" required></textarea>
+                                <div class="form-text">
+                                    Формат строки: <b>Покупатель; Аромат; Объём(мл); Цена</b>.
+                                    Разделитель — точка с запятой или запятая. Пустые строки пропускаются.
+                                    Если покупателя ещё нет в базе — он добавится автоматически.
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-list-check"></i> Добавить список
+                            </button>
+                            <a href="/" class="btn btn-outline-secondary">Отмена</a>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+// Общая выпадашка "Привязать к закупке" проставляет значение в обе формы
+function syncZakupka(val) {
+    document.getElementById('zakupka_id_single').value = val;
+    document.getElementById('zakupka_id_bulk').value = val;
+}
+</script>
 {% endblock %}

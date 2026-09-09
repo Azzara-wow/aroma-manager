@@ -9,6 +9,7 @@ from datetime import datetime
 import os
 
 app = FastAPI()
+from catalog_api import setup_catalog; setup_catalog(app)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -40,6 +41,7 @@ def row_to_dict(row):
 # === Главная страница — дашборд ===
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    _snapshot("index_open")
     db = get_db()
 
     # Активные закупки
@@ -97,6 +99,7 @@ async def create_zakupka(
         name: str = Form(...),
         sheet_url: str = Form(...)
 ):
+    db = None
     try:
         csv_url = make_csv_url(sheet_url)
         df = pd.read_csv(csv_url)
@@ -172,6 +175,13 @@ async def create_zakupka(
         return RedirectResponse(url=f"/zakupka/{zakupka_id}", status_code=303)
 
     except Exception as e:
+        # Обязательно закрываем соединение при ошибке, иначе БД остаётся заблокированной
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            db.close()
         return templates.TemplateResponse(
             "zakupka_new.html",
             {
@@ -354,7 +364,15 @@ async def toggle_rozliv(item_id: int):
     if current:
         new_val = 1 if current["rozliv"] == 0 else 0
         db.execute("UPDATE statuses SET rozliv = ? WHERE zakaz_item_id = ?", (new_val, item_id))
-        db.commit()
+    else:
+        # Строки статуса для этой позиции нет — создаём её,
+        # иначе галочка молча не сохранялась бы (и был бы NameError на new_val)
+        new_val = 1
+        db.execute(
+            "INSERT INTO statuses (zakaz_item_id, rozliv) VALUES (?, ?)",
+            (item_id, new_val)
+        )
+    db.commit()
     db.close()
     return {"ok": True, "new_value": new_val}
 
@@ -367,6 +385,15 @@ async def toggle_upakovka(item_id: int, source: str = "zakupka"):
         if current:
             new_val = 1 if current["upakovka"] == 0 else 0
             db.execute("UPDATE statuses SET upakovka = ? WHERE zakaz_item_id = ?", (new_val, item_id))
+        else:
+            # Раньше здесь не было этой ветки: если строки статуса для позиции
+            # закупки не существовало, галочка молча не сохранялась (и падал
+            # NameError на new_val). Теперь создаём строку статуса.
+            new_val = 1
+            db.execute(
+                "INSERT INTO statuses (zakaz_item_id, upakovka) VALUES (?, ?)",
+                (item_id, new_val)
+            )
     else:
         current = db.execute("SELECT upakovka FROM statuses WHERE nalichie_order_id = ?", (item_id,)).fetchone()
         if current:
@@ -558,8 +585,12 @@ async def edit_buyer(
     return RedirectResponse(url="/buyers", status_code=303)
 
 
-@app.get("/buyers/delete/{buyer_id}")
+@app.post("/buyers/delete/{buyer_id}")
 async def delete_buyer(buyer_id: int):
+    # ВАЖНО: только POST. Раньше был GET — и поисковые боты, прелоадеры браузера
+    # и превью-боты мессенджеров ходили по ссылке-корзине GET-запросом,
+    # молча удаляя покупателей (JS-confirm их не останавливает). Это и была
+    # причина "покупатели отваливаются сами по чуть-чуть".
     db = get_db()
     db.execute("DELETE FROM buyers WHERE id = ?", (buyer_id,))
     db.commit()
@@ -607,6 +638,125 @@ async def create_nalichie_order(
     db.close()
 
     return RedirectResponse(url="/", status_code=303)
+
+
+# === Массовое добавление заказов с наличия (список текстом) ===
+@app.post("/nalichie/new-bulk")
+async def create_nalichie_bulk(
+        request: Request,
+        bulk_text: str = Form(...),
+        zakupka_id: str = Form("none")
+):
+    db = None
+    try:
+        zakupka_id_val = None if zakupka_id == "none" else int(zakupka_id)
+
+        added = 0
+        errors = []
+
+        db = get_db()
+
+        # Разбираем построчно
+        lines = bulk_text.splitlines()
+        for line_num, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue  # пустые строки пропускаем
+
+            # Разделитель — точка с запятой; если её нет, пробуем запятую
+            if ";" in line:
+                parts = [p.strip() for p in line.split(";")]
+            else:
+                parts = [p.strip() for p in line.split(",")]
+
+            if len(parts) < 4:
+                errors.append(f"Строка {line_num}: нужно 4 поля (Покупатель; Аромат; Объём; Цена) — «{line}»")
+                continue
+
+            buyer_name = parts[0]
+            aroma_name = parts[1]
+
+            # Объём — берём только цифры
+            volume_digits = ''.join(filter(str.isdigit, parts[2]))
+            if not volume_digits:
+                errors.append(f"Строка {line_num}: не понял объём «{parts[2]}»")
+                continue
+            volume_ml = int(volume_digits)
+
+            # Цена — убираем пробелы, запятую делаем точкой
+            price_str = parts[3].replace(" ", "").replace(",", ".")
+            try:
+                price = float(price_str)
+            except ValueError:
+                errors.append(f"Строка {line_num}: не понял цену «{parts[3]}»")
+                continue
+
+            if not buyer_name or not aroma_name:
+                errors.append(f"Строка {line_num}: пустое имя покупателя или аромата")
+                continue
+
+            # Добавляем заказ
+            db.execute(
+                "INSERT INTO nalichie_orders (zakupka_id, buyer_name, aroma_name, volume_ml, price, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (zakupka_id_val, buyer_name, aroma_name, volume_ml, price,
+                 datetime.now().strftime("%Y-%m-%d %H:%M"))
+            )
+
+            # Если покупателя нет в базе — заводим
+            existing = db.execute("SELECT id FROM buyers WHERE name = ?", (buyer_name,)).fetchone()
+            if not existing:
+                db.execute("INSERT INTO buyers (name) VALUES (?)", (buyer_name,))
+
+            added += 1
+
+        db.commit()
+        db.close()
+        db = None
+
+        # Если были ошибки в отдельных строках — показываем их, но добавленное сохранено
+        if errors:
+            # Заново готовим данные для формы
+            db2 = get_db()
+            buyers_raw = db2.execute("SELECT * FROM buyers ORDER BY name").fetchall()
+            buyers = [row_to_dict(b) for b in buyers_raw]
+            zakupkas_raw = db2.execute(
+                "SELECT id, name FROM zakupkas WHERE status = 'active' ORDER BY created_at DESC"
+            ).fetchall()
+            zakupkas = [row_to_dict(z) for z in zakupkas_raw]
+            db2.close()
+
+            error_msg = f"Добавлено заказов: {added}. Не удалось обработать строки:\n" + "\n".join(errors)
+            return templates.TemplateResponse("nalichie_new.html", {
+                "request": request,
+                "buyers": buyers,
+                "zakupkas": zakupkas,
+                "error": error_msg
+            })
+
+        return RedirectResponse(url="/nalichie", status_code=303)
+
+    except Exception as e:
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            db.close()
+        # Готовим данные для формы, чтобы показать ошибку
+        db2 = get_db()
+        buyers_raw = db2.execute("SELECT * FROM buyers ORDER BY name").fetchall()
+        buyers = [row_to_dict(b) for b in buyers_raw]
+        zakupkas_raw = db2.execute(
+            "SELECT id, name FROM zakupkas WHERE status = 'active' ORDER BY created_at DESC"
+        ).fetchall()
+        zakupkas = [row_to_dict(z) for z in zakupkas_raw]
+        db2.close()
+        return templates.TemplateResponse("nalichie_new.html", {
+            "request": request,
+            "buyers": buyers,
+            "zakupkas": zakupkas,
+            "error": f"Ошибка при добавлении списка: {str(e)}"
+        })
 
 
 @app.get("/nalichie", response_class=HTMLResponse)
@@ -675,8 +825,9 @@ async def update_nalichie_order(
     return RedirectResponse(url="/nalichie", status_code=303)
 
 
-@app.get("/nalichie/delete/{order_id}")
+@app.post("/nalichie/delete/{order_id}")
 async def delete_nalichie_order(order_id: int):
+    # Только POST — та же причина, что и с покупателями (боты дёргали GET-ссылку).
     db = get_db()
     # Удаляем связанные статусы (если есть)
     db.execute("DELETE FROM statuses WHERE nalichie_order_id = ?", (order_id,))
@@ -684,6 +835,218 @@ async def delete_nalichie_order(order_id: int):
     db.commit()
     db.close()
     return RedirectResponse(url="/nalichie", status_code=303)
+
+# ============================================================
+# СЛУЖЕБНЫЕ СТРАНИЦЫ + СЛЕДОПЫТ (временные, удалить после отладки)
+# ============================================================
+import time as _time_module
+from models import DB_PATH as _DB_PATH
+
+_PROCESS_STARTED_AT = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+_WATCH_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db_watch.log")
+
+
+def _snapshot(tag=""):
+    """Пишет строку состояния базы в отдельный лог-файл.
+    Лог живёт отдельно от data.db, поэтому переживёт любой откат базы."""
+    try:
+        line = {"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "tag": tag}
+        # inode и размер файла базы
+        try:
+            st = os.stat(_DB_PATH)
+            line["inode"] = st.st_ino
+            line["size"] = st.st_size
+            line["mtime"] = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception as e:
+            line["stat_err"] = str(e)
+        # счётчики
+        try:
+            db = get_db()
+            for t in ["buyers", "nalichie_orders", "zakaz_items", "statuses", "zakupkas"]:
+                line[f"cnt_{t}"] = db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            seqs = dict(db.execute("SELECT name, seq FROM sqlite_sequence").fetchall())
+            for t in ["buyers", "nalichie_orders", "zakaz_items", "statuses"]:
+                line[f"seq_{t}"] = seqs.get(t, "-")
+            db.close()
+        except Exception as e:
+            line["db_err"] = str(e)
+        with open(_WATCH_LOG, "a", encoding="utf-8") as f:
+            import json
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # логгер никогда не должен ронять приложение
+
+
+@app.get("/admin/watchlog", response_class=HTMLResponse)
+async def admin_watchlog(request: Request):
+    """Показывает журнал наблюдений: как менялись счётчики и inode во времени."""
+    _snapshot("watchlog_open")
+    rows = []
+    try:
+        import json
+        with open(_WATCH_LOG, encoding="utf-8") as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln:
+                    rows.append(json.loads(ln))
+    except FileNotFoundError:
+        rows = []
+    rows = rows[-200:]  # последние 200 записей
+
+    header = ["ts", "tag", "inode", "size", "cnt_buyers", "seq_buyers",
+              "cnt_nalichie_orders", "seq_nalichie_orders", "cnt_zakaz_items", "cnt_statuses"]
+    th = "".join(f"<th>{h}</th>" for h in header)
+    trs = ""
+    prev_inode = None
+    for r in rows:
+        inode = r.get("inode")
+        # подсветим строку, если inode сменился или счётчики упали
+        style = ""
+        if prev_inode is not None and inode != prev_inode:
+            style = ' style="background:#ffe0b2;"'  # оранжевый — файл подменён
+        prev_inode = inode
+        tds = "".join(f"<td>{r.get(h,'')}</td>" for h in header)
+        trs += f"<tr{style}>{tds}</tr>"
+
+    html = f"""
+    <!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Журнал наблюдений</title>
+    <style>body{{font-family:monospace;margin:20px;font-size:12px;}}
+    table{{border-collapse:collapse;}} td,th{{border:1px solid #ccc;padding:3px 7px;}}
+    th{{background:#f0f0f0;position:sticky;top:0;}}
+    .leg{{font-family:sans-serif;font-size:13px;margin-bottom:10px;}}</style></head><body>
+    <h2>Журнал наблюдений за базой</h2>
+    <div class="leg">
+        Оранжевая строка = у файла data.db сменился <b>inode</b> (файл физически подменили — заливка/восстановление).<br>
+        Если inode стабилен, а <b>cnt_buyers</b> упал в 0 при высоком <b>seq_buyers</b> — значит данные удаляли внутри того же файла.<br>
+        Запись добавляется при каждом заходе на главную и на служебные страницы.
+    </div>
+    <table><thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table>
+    <p style="font-family:sans-serif;"><a href="/admin/watchlog">🔄 Обновить</a></p>
+    </body></html>
+    """
+    return HTMLResponse(content=html)
+
+
+@app.get("/admin/debug", response_class=HTMLResponse)
+async def admin_debug(request: Request):
+    _snapshot("debug_open")
+    db_path = _DB_PATH
+    exists = os.path.exists(db_path)
+    if exists:
+        st = os.stat(db_path)
+        size_bytes = st.st_size
+        inode = st.st_ino
+        mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        size_bytes = 0; inode = "-"; mtime = "— файла нет —"
+    real_path = os.path.realpath(db_path)
+    cwd = os.getcwd()
+
+    db = get_db()
+    counts = {}
+    for table in ["buyers", "zakupkas", "zakaz_items", "nalichie_orders", "statuses"]:
+        try:
+            counts[table] = db.execute(f"SELECT COUNT(*) as c FROM {table}").fetchone()["c"]
+        except Exception as e:
+            counts[table] = f"ошибка: {e}"
+    try:
+        seqs = dict(db.execute("SELECT name, seq FROM sqlite_sequence").fetchall())
+    except Exception:
+        seqs = {}
+    try:
+        last_orders = db.execute("SELECT id, buyer_name, aroma_name, created_at FROM nalichie_orders ORDER BY id DESC LIMIT 5").fetchall()
+        last_orders = [row_to_dict(o) for o in last_orders]
+    except Exception:
+        last_orders = []
+    db.close()
+
+    project_dir = os.path.dirname(real_path)
+    db_files = []
+    try:
+        for f in os.listdir(project_dir):
+            if f.endswith(".db") or ".db-" in f:
+                full = os.path.join(project_dir, f)
+                db_files.append(f"{f} — {os.path.getsize(full)} байт — изменён {datetime.fromtimestamp(os.path.getmtime(full)).strftime('%H:%M:%S')}")
+    except Exception as e:
+        db_files.append(f"ошибка: {e}")
+
+    counts_html = "".join(f"<tr><td>{k}</td><td class='num'>{v}</td><td class='seq'>seq={seqs.get(k,'-')}</td></tr>" for k, v in counts.items())
+    orders_html = "".join(f"<li>#{o['id']} — {o['buyer_name']} — {o['aroma_name']} — {o.get('created_at','')}</li>" for o in last_orders) or "<li>— заказов нет —</li>"
+    dbfiles_html = "".join(f"<li>{f}</li>" for f in db_files) or "<li>— нет —</li>"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    html = f"""
+    <!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Диагностика</title>
+    <style>body{{font-family:monospace;max-width:820px;margin:30px auto;padding:0 16px;font-size:14px;}}
+    h2,h3{{font-family:sans-serif;}} .box{{border:1px solid #ccc;border-radius:8px;padding:12px 16px;margin-bottom:14px;}}
+    table{{border-collapse:collapse;width:100%;}} td{{padding:4px 10px;border-bottom:1px solid #eee;}}
+    .num{{font-weight:bold;text-align:right;font-size:18px;}} .seq{{color:#888;}} .key{{color:#666;}} .big{{font-size:16px;}}</style></head><body>
+    <h2>🔍 Диагностика базы</h2>
+    <div class="box">
+        <div><span class="key">Сейчас на сервере:</span> <b>{now}</b></div>
+        <div><span class="key">Процесс запущен в:</span> <b>{_PROCESS_STARTED_AT}</b></div>
+        <div><span class="key">inode файла базы:</span> <b>{inode}</b> (если менялся — файл подменяли)</div>
+    </div>
+    <div class="box"><h3>Файл базы</h3>
+        <div class="big"><b>{db_path}</b></div>
+        <div><span class="key">realpath:</span> {real_path}</div>
+        <div><span class="key">cwd:</span> {cwd}</div>
+        <div><span class="key">размер:</span> {size_bytes} байт · <span class="key">изменён:</span> <b>{mtime}</b></div>
+    </div>
+    <div class="box"><h3>Строк сейчас (и seq — сколько прошло за всю историю)</h3>
+        <table>{counts_html}</table>
+        <div style="color:#a00;margin-top:8px;">seq &gt; cnt означает, что записи БЫЛИ и были удалены.</div>
+    </div>
+    <div class="box"><h3>Последние заказы наличия</h3><ul>{orders_html}</ul></div>
+    <div class="box"><h3>Все .db-файлы в папке</h3><ul>{dbfiles_html}</ul></div>
+    <p style="font-family:sans-serif;"><a href="/admin/debug">🔄 Обновить</a> · <a href="/admin/watchlog">📊 Журнал наблюдений</a></p>
+    </body></html>
+    """
+    return HTMLResponse(content=html)
+
+
+# --- Перенос покупателей из закупок в справочник ---
+@app.get("/admin/pochinit", response_class=HTMLResponse)
+async def pochinit_view(request: Request):
+    db = get_db()
+    buyers_count = db.execute("SELECT COUNT(*) as c FROM buyers").fetchone()["c"]
+    items_buyers_count = db.execute("SELECT COUNT(DISTINCT buyer_name) as c FROM zakaz_items").fetchone()["c"]
+    missing_raw = db.execute("""SELECT DISTINCT buyer_name FROM zakaz_items WHERE buyer_name NOT IN (SELECT name FROM buyers) ORDER BY buyer_name""").fetchall()
+    missing = [row_to_dict(m)["buyer_name"] for m in missing_raw]
+    db.close()
+    rows_html = "".join(f"<li>{name}</li>" for name in missing) or "<li>— всё на месте —</li>"
+    html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Перенос покупателей</title>
+    <style>body{{font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px;}}
+    .num{{font-size:32px;font-weight:bold;}} .box{{border:1px solid #ccc;border-radius:8px;padding:16px;margin-bottom:16px;}}
+    button{{font-size:16px;padding:10px 20px;border:none;border-radius:6px;background:#0d6efd;color:#fff;cursor:pointer;}}
+    ul{{columns:2;}}</style></head><body>
+    <h2>Перенос покупателей в справочник</h2>
+    <div class="box"><div>Сейчас в справочнике:</div><div class="num">{buyers_count}</div></div>
+    <div class="box"><div>Уникальных имён в закупках:</div><div class="num">{items_buyers_count}</div></div>
+    <div class="box"><div>Не хватает: <b>{len(missing)}</b></div><ul>{rows_html}</ul></div>
+    <form method="POST" action="/admin/pochinit"><button type="submit">Перенести {len(missing)} покупателей</button></form>
+    <p><a href="/admin/debug">→ Диагностика</a></p></body></html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post("/admin/pochinit", response_class=HTMLResponse)
+async def pochinit_apply(request: Request):
+    db = get_db()
+    missing_raw = db.execute("""SELECT DISTINCT buyer_name FROM zakaz_items WHERE buyer_name NOT IN (SELECT name FROM buyers) ORDER BY buyer_name""").fetchall()
+    missing = [row_to_dict(m)["buyer_name"] for m in missing_raw]
+    added = 0
+    for name in missing:
+        db.execute("INSERT INTO buyers (name) VALUES (?)", (name,))
+        added += 1
+    db.commit()
+    db.close()
+    _snapshot("pochinit_applied")
+    html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Готово</title>
+    <style>body{{font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px;}} a{{color:#0d6efd;}}</style></head><body>
+    <h2>Готово ✅</h2><p>Добавлено: <b>{added}</b></p>
+    <p><a href="/admin/debug">→ Диагностика</a> · <a href="/admin/watchlog">→ Журнал</a></p></body></html>"""
+    return HTMLResponse(content=html)
+
 
 # === Запуск приложения ===
 if __name__ == "__main__":

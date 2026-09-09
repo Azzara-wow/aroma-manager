@@ -60,10 +60,16 @@
                             <a href="/nalichie/edit/{{ order.id }}" class="btn btn-sm btn-outline-primary" title="Редактировать">
                                 <i class="bi bi-pencil"></i>
                             </a>
-                            <a href="/nalichie/delete/{{ order.id }}" class="btn btn-sm btn-outline-danger"
-                               onclick="return confirm('Удалить заказ {{ order.aroma_name }} для {{ order.buyer_name }}?')" title="Удалить">
-                                <i class="bi bi-trash"></i>
-                            </a>
+                            <!-- Удаление через POST-форму, а не ссылку.
+                                 Раньше был <a href="/nalichie/delete/..">, боты дёргали его GET-ом
+                                 и удаляли заказы. Теперь только POST. -->
+                            <form method="POST" action="/nalichie/delete/{{ order.id }}"
+                                  style="display:inline"
+                                  onsubmit="return confirm('Удалить заказ {{ order.aroma_name }} для {{ order.buyer_name }}?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Удалить">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}

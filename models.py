@@ -1,7 +1,13 @@
+import os
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "data.db"
+# Путь к базе привязан к папке, где лежит ЭТОТ файл (models.py),
+# а не к папке, откуда случайно запустился процесс.
+# Из-за относительного "data.db" база "терялась" после перезагрузки сервера:
+# процесс стартовал из другой директории и открывал/создавал ПУСТОЙ data.db.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data.db")
 
 
 def init_db():
@@ -81,12 +87,18 @@ def init_db():
         )
     ''')
 
+    # Включаем режим WAL — позволяет читать базу во время записи,
+    # это заметно снижает шанс блокировок "database is locked"
+    c.execute("PRAGMA journal_mode=WAL")
+
     conn.commit()
     conn.close()
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    # timeout=10 — если база на короткое время занята, соединение подождёт
+    # до 10 секунд освобождения, а не упадёт сразу с ошибкой "database is locked"
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
