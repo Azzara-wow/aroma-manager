@@ -40,6 +40,10 @@
     <button class="btn btn-success" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm">
       <i class="bi bi-check2-circle"></i> ② Подтвердить отмеченные
     </button>
+    <a class="btn btn-outline-dark" target="_blank" formnovalidate
+       href="/dostavka/zakupka/{{ zakupka.id }}/labels" onclick="event.stopPropagation()">
+      <i class="bi bi-upc-scan"></i> ③ Печать ярлыков
+    </a>
     <span class="text-muted small">
       Отметь получателей → «Создать» (цена/черновик) → «Подтвердить» (бронь, request_id).
     </span>

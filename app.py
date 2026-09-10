@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
@@ -917,6 +917,70 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
 
     db.close()
     return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+
+
+def _label_msg(text):
+    return HTMLResponse(
+        f"<div style='font-family:system-ui,sans-serif;padding:2rem;max-width:640px'>"
+        f"<h3>🏷 Ярлыки</h3><p>{text}</p>"
+        f"<p><a href='#' onclick='history.back();return false'>← назад</a></p></div>"
+    )
+
+
+@app.get("/dostavka/zakupka/{zakupka_id}/labels")
+def dostavka_labels(zakupka_id: int):
+    """Массовые ярлыки (PDF) по подтверждённым доставкам закупки.
+    В ярлыке Яндекса уже есть получатель — печатается рядом со штрих-кодом."""
+    from yandex_delivery import YandexDeliveryClient
+    from yandex_delivery.errors import ApiError
+
+    db = get_db()
+    rows = db.execute(
+        "SELECT request_id FROM deliveries WHERE zakupka_id = ? "
+        "AND status IN ('confirmed','labeled') AND request_id != ''",
+        (zakupka_id,),
+    ).fetchall()
+    db.close()
+    ids = [r["request_id"] for r in rows]
+    if not ids:
+        return _label_msg("Нет подтверждённых доставок. Сначала «Создать» и «Подтвердить».")
+
+    client = YandexDeliveryClient()
+
+    def _ready(all_ids):
+        out = []
+        for rid in all_ids:
+            try:
+                info = client.get_request_info(rid, as_model=False)
+                if (info.get("state") or {}).get("status"):
+                    out.append(rid)
+            except Exception:
+                pass
+        return out
+
+    try:
+        pdf = client.generate_labels(ids)
+    except ApiError as e:
+        if e.status_code == 409:
+            # часть заявок ещё не готова — печатаем только готовые
+            rids = _ready(ids)
+            if not rids:
+                return _label_msg("Ярлыки ещё готовятся у Яндекса (обычно меньше минуты после "
+                                  "подтверждения). Обнови страницу чуть позже.")
+            try:
+                pdf = client.generate_labels(rids)
+            except ApiError:
+                return _label_msg("Не удалось получить ярлыки, попробуй позже.")
+        else:
+            return _label_msg(f"Ошибка Яндекса: {e.message}")
+    except Exception as e:
+        return _label_msg(f"Сбой запроса: {e}")
+
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="labels_zakupka_{zakupka_id}.pdf"'},
+    )
 
 
 @app.post("/dostavka/zakupka/{zakupka_id}/confirm")
