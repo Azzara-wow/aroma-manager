@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
@@ -596,6 +596,82 @@ async def delete_buyer(buyer_id: int):
     db.commit()
     db.close()
     return RedirectResponse(url="/buyers", status_code=303)
+
+
+# === Доставки (Яндекс): получатели из листа «Покупатели» + выбор ПВЗ ===
+# Хендлеры СИНХРОННЫЕ (def): чтение гуглшита и запросы к Яндексу блокирующие и
+# небыстрые — FastAPI выполнит их в пуле потоков, не блокируя остальные запросы.
+import buyers_sheet
+from yandex_delivery import YandexDeliveryClient
+from yandex_delivery.errors import YandexDeliveryError
+
+
+@app.get("/dostavka", response_class=HTMLResponse)
+def dostavka_list(request: Request):
+    error = None
+    recipients = []
+    try:
+        recipients = buyers_sheet.list_recipients()
+    except FileNotFoundError as e:
+        error = f"Не найден ключ сервисного аккаунта: {e}"
+    except Exception as e:
+        error = f"Не удалось прочитать лист «Покупатели»: {e}"
+    ready = sum(1 for r in recipients if r["delivery_ready"])
+    return templates.TemplateResponse("dostavka.html", {
+        "request": request,
+        "recipients": recipients,
+        "ready": ready,
+        "total": len(recipients),
+        "error": error,
+    })
+
+
+@app.post("/dostavka/fio")
+def dostavka_set_fio(
+    phone: str = Form(...),
+    last_name: str = Form(""),
+    first_name: str = Form(""),
+    patronymic: str = Form(""),
+    city: str = Form(""),
+):
+    try:
+        buyers_sheet.set_fio(phone, last_name, first_name, patronymic)
+        if city.strip():
+            buyers_sheet.set_city(phone, city.strip())
+    except Exception:
+        pass
+    return RedirectResponse(url="/dostavka", status_code=303)
+
+
+@app.get("/dostavka/pvz")
+def dostavka_pvz_search(city: str = "", limit: int = 30):
+    """JSON-поиск ПВЗ по городу для пикера в модалке."""
+    city = (city or "").strip()
+    if not city:
+        return JSONResponse({"ok": False, "error": "Укажите город"})
+    try:
+        c = YandexDeliveryClient()  # окружение из YANDEX_DELIVERY_ENV (по умолч. test)
+        gid = c.geo_id(city)
+        points = c.list_pickup_points(geo_id=gid)
+        data = [{"id": p.id, "name": p.name, "address": p.full_address} for p in points[:limit]]
+        return JSONResponse({"ok": True, "env": c.env, "count": len(points), "points": data})
+    except YandexDeliveryError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@app.post("/dostavka/pvz")
+def dostavka_set_pvz(
+    phone: str = Form(...),
+    pvz_address: str = Form(""),
+    pvz_id: str = Form(""),
+):
+    try:
+        buyers_sheet.set_pvz(phone, pvz_address, pvz_id)
+    except Exception:
+        pass
+    return RedirectResponse(url="/dostavka", status_code=303)
 
 
 # === Заказы с наличия ===

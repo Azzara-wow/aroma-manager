@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Доставки — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h2><i class="bi bi-truck"></i> Доставки — получатели и ПВЗ</h2>
+    <div class="text-muted small">
+      Данные берутся из листа «Покупатели» (aroma_web). Готовы к доставке:
+      <strong>{{ ready }}</strong> из {{ total }}.
+    </div>
+  </div>
+</div>
+
+{% if error %}
+<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
+{% endif %}
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    {% if recipients %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Покупатель</th>
+            <th>ФИО получателя</th>
+            <th>Телефон</th>
+            <th>Город</th>
+            <th>ПВЗ</th>
+            <th></th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recipients %}
+          <tr>
+            <td><strong>{{ r.name or '—' }}</strong></td>
+            <td>{{ r.fio or '—' }}</td>
+            <td>{{ r.phone or '—' }}</td>
+            <td>{{ r.city or '—' }}</td>
+            <td><small>{{ r.pvz_address or '—' }}</small></td>
+            <td>
+              {% if r.delivery_ready %}
+                <span class="badge bg-success">готов</span>
+              {% else %}
+                <span class="badge bg-secondary">нет данных</span>
+              {% endif %}
+            </td>
+            <td class="text-nowrap">
+              <button class="btn btn-sm btn-outline-secondary js-fio"
+                      data-phone="{{ r.phone }}" data-last="{{ r.last_name }}"
+                      data-first="{{ r.first_name }}" data-patr="{{ r.patronymic }}"
+                      data-city="{{ r.city }}" data-bs-toggle="modal" data-bs-target="#fioModal">
+                <i class="bi bi-person"></i> ФИО
+              </button>
+              <button class="btn btn-sm btn-outline-primary js-pvz"
+                      data-phone="{{ r.phone }}" data-city="{{ r.city }}" data-name="{{ r.name }}"
+                      data-bs-toggle="modal" data-bs-target="#pvzModal">
+                <i class="bi bi-geo-alt"></i> ПВЗ
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info"><i class="bi bi-info-circle"></i> Список получателей пуст.</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Модалка: ФИО получателя -->
+<div class="modal fade" id="fioModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="POST" action="/dostavka/fio">
+      <div class="modal-header">
+        <h5 class="modal-title">ФИО получателя</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="phone" id="fio-phone">
+        <div class="mb-2"><label class="form-label">Фамилия</label>
+          <input class="form-control" name="last_name" id="fio-last"></div>
+        <div class="mb-2"><label class="form-label">Имя</label>
+          <input class="form-control" name="first_name" id="fio-first"></div>
+        <div class="mb-2"><label class="form-label">Отчество</label>
+          <input class="form-control" name="patronymic" id="fio-patr"></div>
+        <div class="mb-2"><label class="form-label">Город</label>
+          <input class="form-control" name="city" id="fio-city" placeholder="Москва"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Модалка: выбор ПВЗ -->
+<div class="modal fade" id="pvzModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <form class="modal-content" method="POST" action="/dostavka/pvz">
+      <div class="modal-header">
+        <h5 class="modal-title">Выбор ПВЗ — <span id="pvz-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="phone" id="pvz-phone">
+        <input type="hidden" name="pvz_id" id="pvz-id">
+        <input type="hidden" name="pvz_address" id="pvz-address">
+        <div class="input-group mb-2">
+          <input class="form-control" id="pvz-city" placeholder="Город (напр. Москва)">
+          <button class="btn btn-outline-primary" type="button" id="pvz-search-btn">
+            <i class="bi bi-search"></i> Найти ПВЗ
+          </button>
+        </div>
+        <div id="pvz-hint" class="small text-muted mb-2"></div>
+        <div id="pvz-results" class="list-group" style="max-height:340px;overflow:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="pvz-chosen" class="me-auto small text-success"></span>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="submit" class="btn btn-primary" id="pvz-save" disabled>Сохранить ПВЗ</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ФИО: заполняем модалку из data-атрибутов кнопки
+document.querySelectorAll('.js-fio').forEach(function (b) {
+  b.addEventListener('click', function () {
+    fio_phone.value = b.dataset.phone || '';
+    fio_last.value = b.dataset.last || '';
+    fio_first.value = b.dataset.first || '';
+    fio_patr.value = b.dataset.patr || '';
+    fio_city.value = b.dataset.city || '';
+  });
+});
+// (id элементов доступны как глобальные переменные по их id)
+
+// ПВЗ: заполняем телефон/город, чистим прошлый результат
+document.querySelectorAll('.js-pvz').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.getElementById('pvz-phone').value = b.dataset.phone || '';
+    document.getElementById('pvz-name').textContent = b.dataset.name || '';
+    document.getElementById('pvz-city').value = b.dataset.city || '';
+    document.getElementById('pvz-id').value = '';
+    document.getElementById('pvz-address').value = '';
+    document.getElementById('pvz-results').innerHTML = '';
+    document.getElementById('pvz-hint').textContent = '';
+    document.getElementById('pvz-chosen').textContent = '';
+    document.getElementById('pvz-save').disabled = true;
+  });
+});
+
+document.getElementById('pvz-search-btn').addEventListener('click', async function () {
+  var city = document.getElementById('pvz-city').value.trim();
+  var results = document.getElementById('pvz-results');
+  var hint = document.getElementById('pvz-hint');
+  if (!city) { hint.textContent = 'Введите город'; return; }
+  hint.textContent = 'Ищу ПВЗ…';
+  results.innerHTML = '';
+  try {
+    var resp = await fetch('/dostavka/pvz?city=' + encodeURIComponent(city));
+    var data = await resp.json();
+    if (!data.ok) { hint.textContent = 'Ошибка: ' + (data.error || 'неизвестно'); return; }
+    hint.textContent = 'Найдено ' + data.count + ' (окружение ' + data.env + '), показаны первые ' + data.points.length + '. Тест-среда — только Москва.';
+    data.points.forEach(function (p) {
+      var a = document.createElement('button');
+      a.type = 'button';
+      a.className = 'list-group-item list-group-item-action';
+      a.innerHTML = '<strong>' + (p.name || 'ПВЗ') + '</strong><br><small>' + (p.address || '') + '</small>';
+      a.addEventListener('click', function () {
+        document.getElementById('pvz-id').value = p.id;
+        document.getElementById('pvz-address').value = p.address || p.name || '';
+        document.getElementById('pvz-chosen').textContent = 'Выбран: ' + (p.address || p.name);
+        document.getElementById('pvz-save').disabled = false;
+        results.querySelectorAll('.active').forEach(function (e) { e.classList.remove('active'); });
+        a.classList.add('active');
+      });
+      results.appendChild(a);
+    });
+  } catch (e) { hint.textContent = 'Сбой запроса: ' + e; }
+});
+</script>
+{% endblock %}
