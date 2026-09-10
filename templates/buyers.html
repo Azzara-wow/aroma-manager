@@ -14,6 +14,11 @@
     </div>
 </div>
 
+{% if sheet_error %}
+<div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
+    Лист «Покупатели» недоступен ({{ sheet_error }}) — привязка по подсказке временно без автоподбора.</div>
+{% endif %}
+
 <div class="card shadow-sm">
     <div class="card-body">
         {% if buyers %}
@@ -22,7 +27,7 @@
                 <thead>
                     <tr>
                         <th>Имя</th>
-                        <th>Телефон</th>
+                        <th>Телефон (личность)</th>
                         <th>Отчество</th>
                         <th>Адрес ПВЗ</th>
                         <th>Действия</th>
@@ -32,7 +37,23 @@
                     {% for buyer in buyers %}
                     <tr>
                         <td><strong>{{ buyer.name }}</strong></td>
-                        <td>{{ buyer.phone or '—' }}</td>
+                        <td>
+                            {% if buyer.linked_phone %}
+                                <span class="badge bg-success">{{ buyer.linked_phone }}</span>
+                            {% elif buyer.suggested_phone %}
+                                <span class="text-muted small">возможно: {{ buyer.suggested_phone }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">не привязан</span>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-secondary js-link"
+                                    data-id="{{ buyer.id }}" data-name="{{ buyer.name }}"
+                                    data-current="{{ buyer.linked_phone }}"
+                                    data-suggest="{{ buyer.suggested_phone }}"
+                                    data-bs-toggle="modal" data-bs-target="#linkModal"
+                                    title="Привязать телефон">
+                                <i class="bi bi-link-45deg"></i>
+                            </button>
+                        </td>
                         <td>{{ buyer.middle_name or '—' }}</td>
                         <td><small>{{ buyer.address or '—' }}</small></td>
                         <td>
@@ -140,4 +161,48 @@
         </div>
     </div>
 </div>
+
+<!-- Модалка: привязка телефона (личность) -->
+<div class="modal fade" id="linkModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="POST" action="/buyers/link">
+      <div class="modal-header">
+        <h5 class="modal-title">Привязка телефона — <span id="link-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="buyer_id" id="link-id">
+        <label class="form-label">Получатель из листа «Покупатели»</label>
+        <select class="form-select" name="phone" id="link-phone">
+          <option value="">— не привязывать —</option>
+          {% for o in pick_options %}
+          <option value="{{ o.phone }}">{{ o.label }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text" id="link-hint"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.js-link').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.getElementById('link-id').value = b.dataset.id || '';
+    document.getElementById('link-name').textContent = b.dataset.name || '';
+    var sel = document.getElementById('link-phone');
+    sel.value = b.dataset.current || b.dataset.suggest || '';
+    var hint = document.getElementById('link-hint');
+    if (b.dataset.current) hint.textContent = 'Уже привязан: ' + b.dataset.current;
+    else if (b.dataset.suggest) hint.textContent = 'Подсказка по имени: ' + b.dataset.suggest + ' — проверь и сохрани.';
+    else hint.textContent = 'Совпадение по имени не найдено — выбери вручную.';
+  });
+});
+</script>
 {% endblock %}

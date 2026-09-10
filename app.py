@@ -530,15 +530,49 @@ async def reopen_zakupka(zakupka_id: int):
 
 # === Покупатели ===
 @app.get("/buyers", response_class=HTMLResponse)
-async def buyers_list(request: Request):
+def buyers_list(request: Request):
     db = get_db()
     buyers_raw = db.execute("SELECT * FROM buyers ORDER BY name").fetchall()
     buyers = [row_to_dict(b) for b in buyers_raw]
     db.close()
+
+    # Мост «имя → телефон»: тянем получателей из листа, считаем автоподсказку.
+    # Если лист недоступен — страница всё равно работает, просто без подсказок.
+    import buyers_sheet
+    pick_options, sheet_error = [], None
+    try:
+        recipients = buyers_sheet.list_recipients()
+        pick_options = buyers_sheet.picker_options(recipients)
+        for b in buyers:
+            b["linked_phone"] = buyers_sheet.normalize_phone(b.get("phone") or "")
+            b["suggested_phone"] = (
+                "" if b["linked_phone"]
+                else buyers_sheet.suggest_phone(b.get("name") or "", recipients)
+            )
+    except Exception as e:
+        sheet_error = str(e)
+        for b in buyers:
+            b["linked_phone"] = (b.get("phone") or "")
+            b["suggested_phone"] = ""
+
     return templates.TemplateResponse("buyers.html", {
         "request": request,
-        "buyers": buyers
+        "buyers": buyers,
+        "pick_options": pick_options,
+        "sheet_error": sheet_error,
     })
+
+
+@app.post("/buyers/link")
+def link_buyer_phone(buyer_id: int = Form(...), phone: str = Form("")):
+    """Привязать покупателя дашборда к телефону получателя (канон 7XXXXXXXXXX)."""
+    import buyers_sheet
+    canon = buyers_sheet.normalize_phone(phone) if phone.strip() else ""
+    db = get_db()
+    db.execute("UPDATE buyers SET phone = ? WHERE id = ?", (canon, buyer_id))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/buyers", status_code=303)
 
 
 @app.post("/buyers/add")

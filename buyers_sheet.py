@@ -191,3 +191,56 @@ def set_city(phone_raw, city):
         return {"ok": False, "reason": "not_found"}
     ws.update_acell(f"{_col_a1(COL_CITY)}{idx + 1}", city or "")
     return {"ok": True}
+
+
+# ======================================================================
+#  Мост «имя закупки → телефон получателя» (Вариант A: телефон = личность)
+# ======================================================================
+
+def _canon_name(s):
+    """Имя к сравнимому виду: нижний регистр, схлопнутые пробелы."""
+    return " ".join((s or "").lower().replace("ё", "е").split())
+
+
+def suggest_phone(name, recipients=None):
+    """Лучшее совпадение телефона из листа по имени покупателя закупки.
+    Возвращает канонический телефон или '' если уверенного совпадения нет."""
+    recipients = recipients if recipients is not None else list_recipients()
+    target = _canon_name(name)
+    if not target:
+        return ""
+    ttokens = set(target.split())
+    best_score, best_phone = 0, ""
+    for r in recipients:
+        candidates = [r.get("name", ""), r.get("fio", ""),
+                      (r.get("first_name", "") + " " + r.get("last_name", ""))]
+        score = 0
+        for c in candidates:
+            cc = _canon_name(c)
+            if not cc:
+                continue
+            if cc == target:
+                score = max(score, 100)
+            elif target in cc or cc in target:
+                # вложение засчитываем сильным только если в общей части ≥2 слов
+                # (иначе одно общее имя «Ольга» ложно связывает разных людей)
+                shorter = cc if len(cc) <= len(target) else target
+                score = max(score, 80 if len(shorter.split()) >= 2 else 55)
+            else:
+                overlap = ttokens & set(cc.split())
+                if overlap:
+                    score = max(score, 40 + 10 * len(overlap))
+        if score > best_score:
+            best_score, best_phone = score, r["phone"]
+    return best_phone if best_score >= 70 else ""
+
+
+def picker_options(recipients=None):
+    """Список для выпадашки привязки: [{'phone','label'}], label = 'ФИО/имя — телефон'."""
+    recipients = recipients if recipients is not None else list_recipients()
+    out = []
+    for r in recipients:
+        title = r.get("fio") or r.get("name") or "—"
+        out.append({"phone": r["phone"], "label": f"{title} — {r['phone']}"})
+    out.sort(key=lambda x: x["label"].lower())
+    return out
