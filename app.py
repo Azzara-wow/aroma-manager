@@ -642,6 +642,13 @@ from yandex_delivery.errors import YandexDeliveryError
 
 @app.get("/dostavka", response_class=HTMLResponse)
 def dostavka_list(request: Request):
+    # закупки — для перехода к массовой доставке по каждой
+    db = get_db()
+    zakupkas = [row_to_dict(z) for z in db.execute(
+        "SELECT id, name, status FROM zakupkas ORDER BY status, created_at DESC"
+    ).fetchall()]
+    db.close()
+
     error = None
     recipients = []
     try:
@@ -657,6 +664,7 @@ def dostavka_list(request: Request):
         "ready": ready,
         "total": len(recipients),
         "error": error,
+        "zakupkas": zakupkas,
     })
 
 
@@ -706,6 +714,89 @@ def dostavka_set_pvz(
     except Exception:
         pass
     return RedirectResponse(url="/dostavka", status_code=303)
+
+
+def _delivery_block_reason(phone, rec):
+    """Короткая причина, почему покупатель не готов к доставке (или '')."""
+    if not phone:
+        return "нет привязки телефона (страница «Покупатели»)"
+    if rec is None:
+        return "телефон не найден в листе «Покупатели»"
+    if not (rec.get("first_name") or rec.get("last_name")):
+        return "не заполнено ФИО получателя"
+    if not rec.get("pvz_id"):
+        return "не выбран ПВЗ"
+    return ""
+
+
+@app.get("/dostavka/zakupka/{zakupka_id}", response_class=HTMLResponse)
+def dostavka_zakupka(request: Request, zakupka_id: int):
+    """Превью массовой доставки по закупке: покупатель → телефон → получатель
+    из листа → расчёт посылки (вес/коробка) → готовность. Без вызовов API."""
+    from yandex_delivery import parcel
+
+    db = get_db()
+    zakupka = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not zakupka:
+        db.close()
+        raise HTTPException(status_code=404, detail="Закупка не найдена")
+    items = db.execute(
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum "
+        "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name",
+        (zakupka_id,),
+    ).fetchall()
+    phones = {}
+    for b in db.execute("SELECT name, phone FROM buyers").fetchall():
+        phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
+    db.close()
+
+    # получателей из листа читаем ОДИН раз, кладём в словарь по телефону
+    recips, sheet_error = {}, None
+    try:
+        for r in buyers_sheet.list_recipients():
+            recips[r["phone"]] = r
+    except Exception as e:
+        sheet_error = str(e)
+
+    by_buyer = {}
+    for it in items:
+        by_buyer.setdefault(it["buyer_name"], []).append(it)
+
+    rows = []
+    for buyer_name, its in by_buyer.items():
+        phone = phones.get(buyer_name, "")
+        rec = recips.get(phone) if phone else None
+        lines = [
+            parcel.ParcelLine(
+                it["aroma_name"], it["volume_ml"], 1,
+                int(round((it["total_sum"] or 0) * 100)),
+            )
+            for it in its
+        ]
+        calc = parcel.calc(lines, barcode=f"Z{zakupka_id}-{phone or buyer_name}")
+        reason = _delivery_block_reason(phone, rec)
+        rows.append({
+            "buyer_name": buyer_name,
+            "phone": phone,
+            "fio": rec["fio"] if rec else "",
+            "pvz_address": rec["pvz_address"] if rec else "",
+            "positions": len(its),
+            "weight_g": calc.weight_g,
+            "box": calc.box.code,
+            "ready": (reason == ""),
+            "reason": reason,
+        })
+    rows.sort(key=lambda x: (not x["ready"], x["buyer_name"].lower()))
+    ready_count = sum(1 for r in rows if r["ready"])
+
+    return templates.TemplateResponse("dostavka_zakupka.html", {
+        "request": request,
+        "zakupka": row_to_dict(zakupka),
+        "rows": rows,
+        "ready_count": ready_count,
+        "total": len(rows),
+        "sheet_error": sheet_error,
+    })
 
 
 # === Заказы с наличия ===

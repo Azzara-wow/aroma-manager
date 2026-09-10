@@ -17,6 +17,22 @@
 <div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
 {% endif %}
 
+{% if zakupkas %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <h6 class="mb-2"><i class="bi bi-box-seam"></i> Массовая доставка по закупке</h6>
+    <div class="d-flex flex-wrap gap-2">
+      {% for z in zakupkas %}
+      <a href="/dostavka/zakupka/{{ z.id }}"
+         class="btn btn-sm {{ 'btn-outline-primary' if z.status == 'active' else 'btn-outline-secondary' }}">
+        {{ z.name }}{% if z.status != 'active' %} <small>(архив)</small>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card shadow-sm">
   <div class="card-body">
     {% if recipients %}

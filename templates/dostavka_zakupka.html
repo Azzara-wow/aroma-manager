@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Доставки по закупке — {{ zakupka.name }}{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h2><i class="bi bi-truck"></i> Доставки — {{ zakupka.name }}</h2>
+    <div class="text-muted small">
+      Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
+      Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
+    </div>
+  </div>
+  <div class="col text-end">
+    <a href="/dostavka" class="btn btn-outline-secondary btn-sm">← Все доставки</a>
+  </div>
+</div>
+
+{% if sheet_error %}
+<div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
+  Лист «Покупатели» недоступен ({{ sheet_error }}) — получатели/ПВЗ не подтянулись.</div>
+{% endif %}
+
+<div class="card shadow-sm mb-3">
+  <div class="card-body d-flex align-items-center gap-3">
+    <button class="btn btn-primary" disabled title="Появится в Фазе 4.2">
+      <i class="bi bi-box-seam"></i> Создать доставки (скоро)
+    </button>
+    <span class="text-muted small">
+      Дальше (4.2): по отмеченным готовым — массовое создание заявок в Яндексе
+      (цена/черновик) и подтверждение.
+    </span>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    {% if rows %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Покупатель</th>
+            <th>ФИО получателя</th>
+            <th>Телефон</th>
+            <th>ПВЗ назначения</th>
+            <th>Поз.</th>
+            <th>Вес, г</th>
+            <th>Коробка</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="{{ '' if r.ready else 'table-light text-muted' }}">
+            <td>
+              <input type="checkbox" class="form-check-input" {{ 'checked' if r.ready else 'disabled' }}>
+            </td>
+            <td><strong>{{ r.buyer_name }}</strong></td>
+            <td>{{ r.fio or '—' }}</td>
+            <td>{{ r.phone or '—' }}</td>
+            <td><small>{{ r.pvz_address or '—' }}</small></td>
+            <td>{{ r.positions }}</td>
+            <td>{{ r.weight_g }}</td>
+            <td><span class="badge bg-light text-dark border">{{ r.box }}</span></td>
+            <td>
+              {% if r.ready %}
+                <span class="badge bg-success">готов</span>
+              {% else %}
+                <span class="badge bg-secondary" title="{{ r.reason }}">{{ r.reason }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">В этой закупке нет позиций.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
