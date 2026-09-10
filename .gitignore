@@ -46,3 +46,8 @@ data_backup_*.db
 __pycache__/
 .venv/
 .idea/
+
+# Архивы переноса с сервера
+*.tar.gz
+*.zip
+labels_*.pdf
