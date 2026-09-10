@@ -200,10 +200,10 @@ document.getElementById('origin-search-btn').addEventListener('click', async fun
   if (!city) { hint.textContent = 'Введите город'; return; }
   hint.textContent = 'Ищу ПВЗ…'; results.innerHTML = '';
   try {
-    var resp = await fetch('/dostavka/pvz?city=' + encodeURIComponent(city));
+    var resp = await fetch('/dostavka/pvz?dropoff=1&city=' + encodeURIComponent(city));
     var data = await resp.json();
     if (!data.ok) { hint.textContent = 'Ошибка: ' + (data.error || 'неизвестно'); return; }
-    hint.textContent = 'Найдено ' + data.count + ' (окружение ' + data.env + '). Тест — только Москва.';
+    hint.textContent = 'Найдено точек приёма: ' + data.count + ' (окружение ' + data.env + '). Тест — только Москва.';
     data.points.forEach(function (p) {
       var a = document.createElement('button');
       a.type = 'button';

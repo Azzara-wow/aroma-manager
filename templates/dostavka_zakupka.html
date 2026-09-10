@@ -21,14 +21,27 @@
   Лист «Покупатели» недоступен ({{ sheet_error }}) — получатели/ПВЗ не подтянулись.</div>
 {% endif %}
 
+{% if not origin_pvz_id %}
+<div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
+  Не задан <strong>ПВЗ отправления</strong> — задай его на странице
+  <a href="/dostavka">«Доставки»</a>, иначе создать заявки нельзя.</div>
+{% else %}
+<div class="text-muted small mb-2"><i class="bi bi-geo-alt-fill"></i>
+  Отправление: {{ origin_pvz_address or origin_pvz_id }}</div>
+{% endif %}
+
+<form method="POST">
 <div class="card shadow-sm mb-3">
-  <div class="card-body d-flex align-items-center gap-3">
-    <button class="btn btn-primary" disabled title="Появится в Фазе 4.2">
-      <i class="bi bi-box-seam"></i> Создать доставки (скоро)
+  <div class="card-body d-flex align-items-center gap-2 flex-wrap">
+    <button class="btn btn-primary" formaction="/dostavka/zakupka/{{ zakupka.id }}/create"
+            {{ 'disabled' if not origin_pvz_id else '' }}>
+      <i class="bi bi-box-seam"></i> ① Создать доставки
+    </button>
+    <button class="btn btn-success" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm">
+      <i class="bi bi-check2-circle"></i> ② Подтвердить отмеченные
     </button>
     <span class="text-muted small">
-      Дальше (4.2): по отмеченным готовым — массовое создание заявок в Яндексе
-      (цена/черновик) и подтверждение.
+      Отметь получателей → «Создать» (цена/черновик) → «Подтвердить» (бронь, request_id).
     </span>
   </div>
 </div>
@@ -48,14 +61,15 @@
             <th>Поз.</th>
             <th>Вес, г</th>
             <th>Коробка</th>
-            <th>Статус</th>
+            <th>Статус доставки</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
           <tr class="{{ '' if r.ready else 'table-light text-muted' }}">
             <td>
-              <input type="checkbox" class="form-check-input" {{ 'checked' if r.ready else 'disabled' }}>
+              <input type="checkbox" class="form-check-input" name="phones" value="{{ r.phone }}"
+                     {{ 'checked' if r.ready else 'disabled' }}>
             </td>
             <td><strong>{{ r.buyer_name }}</strong></td>
             <td>{{ r.fio or '—' }}</td>
@@ -65,8 +79,18 @@
             <td>{{ r.weight_g }}</td>
             <td><span class="badge bg-light text-dark border">{{ r.box }}</span></td>
             <td>
-              {% if r.ready %}
-                <span class="badge bg-success">готов</span>
+              {% if r.delivery %}
+                {% if r.delivery.status == 'confirmed' %}
+                  <span class="badge bg-success">подтверждён</span>
+                  <div class="small text-muted">{{ r.delivery.request_id }}</div>
+                {% elif r.delivery.status == 'offered' %}
+                  <span class="badge bg-warning text-dark">черновик</span>
+                  <span class="small">{{ r.delivery.price }}</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ r.delivery.status }}</span>
+                {% endif %}
+              {% elif r.ready %}
+                <span class="badge bg-light text-dark border">готов</span>
               {% else %}
                 <span class="badge bg-secondary" title="{{ r.reason }}">{{ r.reason }}</span>
               {% endif %}
@@ -81,4 +105,5 @@
     {% endif %}
   </div>
 </div>
+</form>
 {% endblock %}

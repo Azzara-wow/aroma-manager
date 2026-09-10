@@ -6,6 +6,7 @@ import pandas as pd
 from urllib.parse import urlparse, parse_qs
 import sqlite3
 from datetime import datetime
+from typing import List
 import os
 
 app = FastAPI()
@@ -696,15 +697,17 @@ def dostavka_set_fio(
 
 
 @app.get("/dostavka/pvz")
-def dostavka_pvz_search(city: str = "", limit: int = 30):
-    """JSON-поиск ПВЗ по городу для пикера в модалке."""
+def dostavka_pvz_search(city: str = "", limit: int = 30, dropoff: int = 0):
+    """JSON-поиск ПВЗ по городу для пикера в модалке.
+    dropoff=1 — только точки приёма посылок (для ПВЗ ОТПРАВЛЕНИЯ, точка А)."""
     city = (city or "").strip()
     if not city:
         return JSONResponse({"ok": False, "error": "Укажите город"})
     try:
         c = YandexDeliveryClient()  # окружение из YANDEX_DELIVERY_ENV (по умолч. test)
         gid = c.geo_id(city)
-        points = c.list_pickup_points(geo_id=gid)
+        kwargs = {"available_for_dropoff": True} if dropoff else {}
+        points = c.list_pickup_points(geo_id=gid, **kwargs)
         data = [{"id": p.id, "name": p.name, "address": p.full_address} for p in points[:limit]]
         return JSONResponse({"ok": True, "env": c.env, "count": len(points), "points": data})
     except YandexDeliveryError as e:
@@ -758,6 +761,12 @@ def dostavka_zakupka(request: Request, zakupka_id: int):
     phones = {}
     for b in db.execute("SELECT name, phone FROM buyers").fetchall():
         phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
+    deliveries = {}
+    for d in db.execute(
+        "SELECT phone, status, price, request_id FROM deliveries WHERE zakupka_id = ?",
+        (zakupka_id,),
+    ).fetchall():
+        deliveries[d["phone"]] = row_to_dict(d)
     db.close()
 
     # получателей из листа читаем ОДИН раз, кладём в словарь по телефону
@@ -795,9 +804,11 @@ def dostavka_zakupka(request: Request, zakupka_id: int):
             "box": calc.box.code,
             "ready": (reason == ""),
             "reason": reason,
+            "delivery": deliveries.get(phone),
         })
     rows.sort(key=lambda x: (not x["ready"], x["buyer_name"].lower()))
     ready_count = sum(1 for r in rows if r["ready"])
+    origin_id = get_setting("origin_pvz_id", "")
 
     return templates.TemplateResponse("dostavka_zakupka.html", {
         "request": request,
@@ -806,7 +817,136 @@ def dostavka_zakupka(request: Request, zakupka_id: int):
         "ready_count": ready_count,
         "total": len(rows),
         "sheet_error": sheet_error,
+        "origin_pvz_id": origin_id,
+        "origin_pvz_address": get_setting("origin_pvz_address", ""),
     })
+
+
+def _zakupka_lines_by_phone(db, zakupka_id):
+    """Собирает позиции закупки по телефону покупателя: {phone: ([ParcelLine], buyer_name)}."""
+    from yandex_delivery import parcel
+    phone_by_name = {}
+    for b in db.execute("SELECT name, phone FROM buyers").fetchall():
+        phone_by_name[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
+    items = db.execute(
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum FROM zakaz_items WHERE zakupka_id = ?",
+        (zakupka_id,),
+    ).fetchall()
+    out = {}
+    for it in items:
+        ph = phone_by_name.get(it["buyer_name"], "")
+        if not ph:
+            continue
+        lines, _ = out.setdefault(ph, ([], it["buyer_name"]))
+        lines.append(parcel.ParcelLine(
+            it["aroma_name"], it["volume_ml"], 1, int(round((it["total_sum"] or 0) * 100))
+        ))
+    return out
+
+
+@app.post("/dostavka/zakupka/{zakupka_id}/create")
+def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
+    """ШАГ ①: массовое offers/create по отмеченным готовым получателям."""
+    import uuid
+    from yandex_delivery import YandexDeliveryClient, parcel
+
+    origin_id = get_setting("origin_pvz_id", "")
+    if not origin_id or not phones:
+        return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+
+    try:
+        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+    except Exception:
+        recips = {}
+
+    db = get_db()
+    lines_by_phone = _zakupka_lines_by_phone(db, zakupka_id)
+    client = YandexDeliveryClient()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    for ph in set(phones):
+        rec = recips.get(ph)
+        if not rec or not rec.get("pvz_id") or not (rec.get("first_name") or rec.get("last_name")):
+            continue
+        pair = lines_by_phone.get(ph)
+        if not pair or not pair[0]:
+            continue
+        lines, buyer_name = pair
+        # уже есть активная доставка по этому телефону в этой закупке?
+        if db.execute(
+            "SELECT id FROM deliveries WHERE zakupka_id=? AND phone=? AND status IN ('offered','confirmed')",
+            (zakupka_id, ph),
+        ).fetchone():
+            continue
+
+        opid = "luzi-" + uuid.uuid4().hex[:12]
+        calc = parcel.calc(lines, barcode=opid)
+        recipient = {"phone": "+" + ph}
+        recipient["first_name"] = rec.get("first_name") or rec.get("last_name") or "Получатель"
+        if rec.get("last_name"):
+            recipient["last_name"] = rec["last_name"]
+        if rec.get("patronymic"):
+            recipient["patronymic"] = rec["patronymic"]
+        payload = {
+            "info": {"operator_request_id": opid},
+            "source": {"platform_station": {"platform_id": origin_id}},
+            "destination": {"type": "platform_station",
+                            "platform_station": {"platform_id": rec["pvz_id"]}},
+            "items": [i.to_dict() for i in calc.items],
+            "places": [calc.place.to_dict()],
+            "billing_info": {"payment_method": "already_paid", "delivery_cost": 0},
+            "recipient_info": recipient,
+            "last_mile_policy": "self_pickup",
+        }
+        try:
+            resp = client.create_offers(payload)
+            offers = resp.get("offers") or []
+            if not offers:
+                continue
+            off = offers[0]
+            det = off.get("offer_details") or {}
+            price = det.get("pricing_total") or det.get("pricing") or ""
+            db.execute(
+                "INSERT INTO deliveries (zakupka_id, buyer_name, phone, operator_request_id, "
+                "offer_id, price, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (zakupka_id, buyer_name, ph, opid, off.get("offer_id", ""), price, "offered", now, now),
+            )
+            db.commit()
+        except Exception:
+            continue
+
+    db.close()
+    return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+
+
+@app.post("/dostavka/zakupka/{zakupka_id}/confirm")
+def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
+    """ШАГ ②: подтверждение отмеченных черновиков (offers/confirm → request_id)."""
+    from yandex_delivery import YandexDeliveryClient
+
+    client = YandexDeliveryClient()
+    db = get_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    selected = set(phones)
+    rows = db.execute(
+        "SELECT id, offer_id, phone FROM deliveries WHERE zakupka_id=? AND status='offered'",
+        (zakupka_id,),
+    ).fetchall()
+    for r in rows:
+        if selected and r["phone"] not in selected:
+            continue
+        try:
+            resp = client.confirm_offer(r["offer_id"])
+            rid = resp.get("request_id", "")
+            db.execute(
+                "UPDATE deliveries SET request_id=?, status='confirmed', updated_at=? WHERE id=?",
+                (rid, now, r["id"]),
+            )
+            db.commit()
+        except Exception:
+            continue
+    db.close()
+    return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
 
 
 # === Заказы с наличия ===
