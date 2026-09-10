@@ -13,7 +13,7 @@ from catalog_api import setup_catalog; setup_catalog(app)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-from models import get_db, init_db
+from models import get_db, init_db, get_setting, set_setting
 
 # === Функция для получения CSV из Google Sheets ===
 def make_csv_url(sheet_url: str) -> str:
@@ -665,7 +665,17 @@ def dostavka_list(request: Request):
         "total": len(recipients),
         "error": error,
         "zakupkas": zakupkas,
+        "origin_pvz_address": get_setting("origin_pvz_address", ""),
+        "origin_pvz_id": get_setting("origin_pvz_id", ""),
     })
+
+
+@app.post("/dostavka/origin")
+def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form("")):
+    """Сохранить ПВЗ отправления (точка А) в настройки."""
+    set_setting("origin_pvz_id", pvz_id.strip())
+    set_setting("origin_pvz_address", pvz_address.strip())
+    return RedirectResponse(url="/dostavka", status_code=303)
 
 
 @app.post("/dostavka/fio")

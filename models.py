@@ -87,10 +87,54 @@ def init_db():
         )
     ''')
 
+    # Таблица настроек (ключ-значение): ПВЗ отправления и прочее
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        )
+    ''')
+
+    # Таблица доставок (Яндекс): двухшаг offers/create -> offers/confirm
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            zakupka_id INTEGER,
+            buyer_name TEXT,
+            phone TEXT,
+            operator_request_id TEXT,
+            offer_id TEXT DEFAULT '',
+            price TEXT DEFAULT '',
+            request_id TEXT DEFAULT '',
+            status TEXT DEFAULT '',
+            barcode TEXT DEFAULT '',
+            created_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        )
+    ''')
+
     # Включаем режим WAL — позволяет читать базу во время записи,
     # это заметно снижает шанс блокировок "database is locked"
     c.execute("PRAGMA journal_mode=WAL")
 
+    conn.commit()
+    conn.close()
+
+
+def get_setting(key, default=""):
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row and row["value"] is not None else default
+
+
+def set_setting(key, value):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value or ""),
+    )
     conn.commit()
     conn.close()
 

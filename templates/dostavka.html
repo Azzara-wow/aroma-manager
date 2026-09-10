@@ -33,6 +33,22 @@
 </div>
 {% endif %}
 
+<div class="card shadow-sm mb-3">
+  <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+    <div><i class="bi bi-geo-alt-fill"></i> <strong>ПВЗ отправления</strong> (точка А):</div>
+    <div>
+      {% if origin_pvz_address %}
+        <span class="badge bg-info text-dark">{{ origin_pvz_address }}</span>
+      {% else %}
+        <span class="badge bg-secondary">не задан</span>
+      {% endif %}
+    </div>
+    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#originModal">
+      <i class="bi bi-pencil"></i> Изменить
+    </button>
+  </div>
+</div>
+
 <div class="card shadow-sm">
   <div class="card-body">
     {% if recipients %}
@@ -144,9 +160,69 @@
     </form>
   </div>
 </div>
+<!-- Модалка: ПВЗ отправления (точка А) -->
+<div class="modal fade" id="originModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <form class="modal-content" method="POST" action="/dostavka/origin">
+      <div class="modal-header">
+        <h5 class="modal-title">ПВЗ отправления (откуда сдаёшь посылки)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="pvz_id" id="origin-id">
+        <input type="hidden" name="pvz_address" id="origin-address">
+        <div class="input-group mb-2">
+          <input class="form-control" id="origin-city" placeholder="Город (напр. Москва)">
+          <button class="btn btn-outline-primary" type="button" id="origin-search-btn">
+            <i class="bi bi-search"></i> Найти ПВЗ
+          </button>
+        </div>
+        <div id="origin-hint" class="small text-muted mb-2"></div>
+        <div id="origin-results" class="list-group" style="max-height:340px;overflow:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="origin-chosen" class="me-auto small text-success"></span>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="submit" class="btn btn-primary" id="origin-save" disabled>Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Пикер ПВЗ отправления (переиспользует /dostavka/pvz)
+document.getElementById('origin-search-btn').addEventListener('click', async function () {
+  var city = document.getElementById('origin-city').value.trim();
+  var results = document.getElementById('origin-results');
+  var hint = document.getElementById('origin-hint');
+  if (!city) { hint.textContent = 'Введите город'; return; }
+  hint.textContent = 'Ищу ПВЗ…'; results.innerHTML = '';
+  try {
+    var resp = await fetch('/dostavka/pvz?city=' + encodeURIComponent(city));
+    var data = await resp.json();
+    if (!data.ok) { hint.textContent = 'Ошибка: ' + (data.error || 'неизвестно'); return; }
+    hint.textContent = 'Найдено ' + data.count + ' (окружение ' + data.env + '). Тест — только Москва.';
+    data.points.forEach(function (p) {
+      var a = document.createElement('button');
+      a.type = 'button';
+      a.className = 'list-group-item list-group-item-action';
+      a.innerHTML = '<strong>' + (p.name || 'ПВЗ') + '</strong><br><small>' + (p.address || '') + '</small>';
+      a.addEventListener('click', function () {
+        document.getElementById('origin-id').value = p.id;
+        document.getElementById('origin-address').value = p.address || p.name || '';
+        document.getElementById('origin-chosen').textContent = 'Выбран: ' + (p.address || p.name);
+        document.getElementById('origin-save').disabled = false;
+        results.querySelectorAll('.active').forEach(function (e) { e.classList.remove('active'); });
+        a.classList.add('active');
+      });
+      results.appendChild(a);
+    });
+  } catch (e) { hint.textContent = 'Сбой запроса: ' + e; }
+});
+</script>
+
 <script>
 // ФИО: заполняем модалку из data-атрибутов кнопки
 document.querySelectorAll('.js-fio').forEach(function (b) {
