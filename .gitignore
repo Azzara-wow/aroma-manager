@@ -51,3 +51,5 @@ __pycache__/
 *.tar.gz
 *.zip
 labels_*.pdf
+label_*.png
+label_*.pdf
