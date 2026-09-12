@@ -35,6 +35,7 @@ KEY_PATHS = [
 # индексы столбцов
 COL_PHONE, COL_NAME, COL_CODE, COL_ADDRESS, COL_ROLE, COL_CREATED, COL_NOTE = range(7)
 COL_LAST, COL_FIRST, COL_PATR, COL_CITY, COL_PVZ_ADDR, COL_PVZ_ID = range(7, 13)
+COL_TRACKING = 13  # N — ссылка отслеживания Яндекса (пишет дашборд после подтверждения)
 
 
 def _key_path():
@@ -190,6 +191,17 @@ def set_city(phone_raw, city):
     if idx is None:
         return {"ok": False, "reason": "not_found"}
     ws.update_acell(f"{_col_a1(COL_CITY)}{idx + 1}", city or "")
+    return {"ok": True}
+
+
+def set_tracking(phone_raw, url):
+    """Записать ссылку отслеживания (колонка N) — чтобы покупатель видел её в витрине."""
+    canon = normalize_phone(phone_raw)
+    ws = _ws()
+    idx = _find_row(ws.get_all_values(), canon)
+    if idx is None:
+        return {"ok": False, "reason": "not_found"}
+    ws.update_acell(f"{_col_a1(COL_TRACKING)}{idx + 1}", url or "")
     return {"ok": True}
 
 

@@ -783,7 +783,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
     deliveries = {}
     for d in db.execute(
-        "SELECT id, phone, status, price, request_id FROM deliveries "
+        "SELECT id, phone, status, price, request_id, tracking_url FROM deliveries "
         "WHERE zakupka_id = ? AND status != 'cancelled'",
         (zakupka_id,),
     ).fetchall():
@@ -1071,29 +1071,93 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
     """ШАГ ②: подтверждение отмеченных черновиков (offers/confirm → request_id)."""
     from yandex_delivery import YandexDeliveryClient
 
+    from urllib.parse import quote
+
+    def _back(msg):
+        return RedirectResponse(
+            url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(msg)}", status_code=303)
+
     client = YandexDeliveryClient()
     db = get_db()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     selected = set(phones)
     rows = db.execute(
-        "SELECT id, offer_id, phone FROM deliveries WHERE zakupka_id=? AND status='offered'",
+        "SELECT id, offer_id, phone, buyer_name FROM deliveries "
+        "WHERE zakupka_id=? AND status='offered'",
         (zakupka_id,),
     ).fetchall()
+    confirmed, errors = 0, []
     for r in rows:
         if selected and r["phone"] not in selected:
             continue
         try:
             resp = client.confirm_offer(r["offer_id"])
             rid = resp.get("request_id", "")
+            # ссылка отслеживания (sharing_url) — тянем сразу, если уже доступна
+            track = ""
+            try:
+                info = client.get_request_info(rid, as_model=False)
+                track = info.get("sharing_url", "") or ""
+            except Exception:
+                pass
             db.execute(
-                "UPDATE deliveries SET request_id=?, status='confirmed', updated_at=? WHERE id=?",
-                (rid, now, r["id"]),
+                "UPDATE deliveries SET request_id=?, status='confirmed', "
+                "tracking_url=?, updated_at=? WHERE id=?",
+                (rid, track, now, r["id"]),
             )
             db.commit()
-        except Exception:
-            continue
+            confirmed += 1
+            if track:  # покупатель увидит ссылку в витрине (лист «Покупатели», колонка N)
+                try:
+                    buyers_sheet.set_tracking(r["phone"], track)
+                except Exception:
+                    pass
+        except YandexDeliveryError as e:
+            errors.append(f"{r['buyer_name']}: {getattr(e, 'message', e)}")
+        except Exception as e:
+            errors.append(f"{r['buyer_name']}: {e}")
     db.close()
-    return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+    parts = [f"Подтверждено: {confirmed}"]
+    if errors:
+        parts.append("ошибки — " + "; ".join(errors[:5]))
+    return _back(". ".join(parts))
+
+
+@app.post("/dostavka/delivery/{delivery_id}/track")
+def dostavka_refresh_track(delivery_id: int):
+    """Обновить ссылку отслеживания (sharing_url) из request/info."""
+    from urllib.parse import quote
+
+    db = get_db()
+    d = db.execute("SELECT * FROM deliveries WHERE id = ?", (delivery_id,)).fetchone()
+    if not d:
+        db.close()
+        return _op_msg("Доставка не найдена.")
+    d = row_to_dict(d)
+    zid = d["zakupka_id"]
+
+    def _back(msg):
+        return RedirectResponse(url=f"/dostavka/zakupka/{zid}?msg={quote(msg)}", status_code=303)
+
+    if not d.get("request_id"):
+        db.close()
+        return _back("Ссылка появится после подтверждения заявки.")
+    try:
+        info = YandexDeliveryClient().get_request_info(d["request_id"], as_model=False)
+        track = info.get("sharing_url", "") or ""
+    except Exception as e:
+        db.close()
+        return _back(f"Не удалось получить ссылку: {e}")
+    db.execute("UPDATE deliveries SET tracking_url = ? WHERE id = ?", (track, delivery_id))
+    db.commit()
+    db.close()
+    if track:
+        try:
+            buyers_sheet.set_tracking(d["phone"], track)
+        except Exception:
+            pass
+    return _back("Ссылка отслеживания обновлена." if track
+                 else "Яндекс пока не отдал ссылку — попробуй чуть позже.")
 
 
 # === Заказы с наличия ===
