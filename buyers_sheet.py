@@ -195,9 +195,19 @@ def set_city(phone_raw, city):
 
 
 def set_tracking(phone_raw, url):
-    """Записать ссылку отслеживания (колонка N) — чтобы покупатель видел её в витрине."""
+    """Записать ссылку отслеживания (колонка N) — чтобы покупатель видел её в витрине.
+
+    Лист изначально шириной 13 колонок (A–M), поэтому при первой записи расширяем
+    сетку до N (иначе Google отвечает 'exceeds grid limits')."""
     canon = normalize_phone(phone_raw)
     ws = _ws()
+    need = COL_TRACKING + 1  # нужно минимум 14 колонок (до N включительно)
+    if ws.col_count < need:
+        ws.add_cols(need - ws.col_count)
+        try:
+            ws.update_acell(f"{_col_a1(COL_TRACKING)}1", "отслеживание")
+        except Exception:
+            pass
     idx = _find_row(ws.get_all_values(), canon)
     if idx is None:
         return {"ok": False, "reason": "not_found"}
