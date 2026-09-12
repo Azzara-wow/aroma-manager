@@ -783,7 +783,8 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
     deliveries = {}
     for d in db.execute(
-        "SELECT phone, status, price, request_id FROM deliveries WHERE zakupka_id = ?",
+        "SELECT id, phone, status, price, request_id FROM deliveries "
+        "WHERE zakupka_id = ? AND status != 'cancelled'",
         (zakupka_id,),
     ).fetchall():
         deliveries[d["phone"]] = row_to_dict(d)
@@ -959,6 +960,46 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
     if errors:
         parts.append("ошибки — " + "; ".join(errors[:5]))
     return _back(". ".join(parts))
+
+
+@app.post("/dostavka/delivery/{delivery_id}/cancel")
+def dostavka_cancel(delivery_id: int):
+    """Отмена доставки. Черновик (offered) — убираем локально (брони не было).
+    Подтверждённая — зовём request/cancel в Яндексе; если статус уже не позволяет,
+    показываем ответ Яндекса."""
+    from urllib.parse import quote
+
+    db = get_db()
+    d = db.execute("SELECT * FROM deliveries WHERE id = ?", (delivery_id,)).fetchone()
+    if not d:
+        db.close()
+        return _op_msg("Доставка не найдена.")
+    d = row_to_dict(d)
+    zid = d["zakupka_id"]
+
+    def _back(msg):
+        return RedirectResponse(url=f"/dostavka/zakupka/{zid}?msg={quote(msg)}", status_code=303)
+
+    # Черновик без брони — просто удаляем строку (в Яндексе заявки не было).
+    if not d.get("request_id") or d.get("status") == "offered":
+        db.execute("DELETE FROM deliveries WHERE id = ?", (delivery_id,))
+        db.commit()
+        db.close()
+        return _back(f"Черновик «{d['buyer_name']}» убран (в Яндексе брони не было).")
+
+    # Подтверждённая — отменяем в Яндексе.
+    try:
+        YandexDeliveryClient().cancel_request(d["request_id"])
+    except YandexDeliveryError as e:
+        db.close()
+        return _back(f"Не удалось отменить «{d['buyer_name']}»: {getattr(e, 'message', e)}")
+    db.execute(
+        "UPDATE deliveries SET status = 'cancelled', updated_at = ? WHERE id = ?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M"), delivery_id),
+    )
+    db.commit()
+    db.close()
+    return _back(f"Доставка «{d['buyer_name']}» отменена в Яндексе.")
 
 
 def _label_msg(text):

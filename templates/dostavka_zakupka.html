@@ -41,7 +41,8 @@
             {{ 'disabled' if not origin_pvz_id else '' }}>
       <i class="bi bi-box-seam"></i> ① Создать доставки
     </button>
-    <button class="btn btn-success" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm">
+    <button class="btn btn-success" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm"
+            onclick="return confirm('Подтвердить отмеченные? Это РЕАЛЬНАЯ бронь доставки в Яндексе.')">
       <i class="bi bi-check2-circle"></i> ② Подтвердить отмеченные
     </button>
     <a class="btn btn-outline-dark" target="_blank" formnovalidate
@@ -97,6 +98,11 @@
                 {% else %}
                   <span class="badge bg-secondary">{{ r.delivery.status }}</span>
                 {% endif %}
+                <button class="btn btn-sm btn-outline-danger ms-1 py-0"
+                        formaction="/dostavka/delivery/{{ r.delivery.id }}/cancel"
+                        onclick="return confirm('Отменить доставку «{{ r.buyer_name }}»?{% if r.delivery.status == 'confirmed' %} Это отменит РЕАЛЬНУЮ заявку в Яндексе.{% endif %}')">
+                  Отменить
+                </button>
               {% elif r.ready %}
                 <span class="badge bg-light text-dark border">готов</span>
               {% else %}
