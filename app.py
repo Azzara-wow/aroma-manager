@@ -679,6 +679,16 @@ def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form("")):
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
+def _op_msg(text):
+    """Простая страница-уведомление об ошибке операции с кнопкой «назад»."""
+    return HTMLResponse(
+        f"<div style='font-family:system-ui,sans-serif;padding:2rem;max-width:640px'>"
+        f"<h3>Не выполнено</h3><p>{text}</p>"
+        f"<p><a href='/dostavka'>← к доставкам</a></p></div>",
+        status_code=200,
+    )
+
+
 @app.post("/dostavka/fio")
 def dostavka_set_fio(
     phone: str = Form(...),
@@ -688,11 +698,14 @@ def dostavka_set_fio(
     city: str = Form(""),
 ):
     try:
-        buyers_sheet.set_fio(phone, last_name, first_name, patronymic)
+        res = buyers_sheet.set_fio(phone, last_name, first_name, patronymic)
+        if not res.get("ok"):
+            return _op_msg(f"Не удалось записать ФИО: «{res.get('reason')}» "
+                          f"(телефон {phone or '—'} не найден в листе «Покупатели»).")
         if city.strip():
             buyers_sheet.set_city(phone, city.strip())
-    except Exception:
-        pass
+    except Exception as e:
+        return _op_msg(f"Ошибка записи ФИО в лист: {e}")
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
@@ -706,8 +719,12 @@ def dostavka_pvz_search(city: str = "", limit: int = 30, dropoff: int = 0):
     try:
         c = YandexDeliveryClient()  # окружение из YANDEX_DELIVERY_ENV (по умолч. test)
         gid = c.geo_id(city)
-        kwargs = {"available_for_dropoff": True} if dropoff else {}
-        points = c.list_pickup_points(geo_id=gid, **kwargs)
+        points = c.list_pickup_points(geo_id=gid)
+        # Для ПВЗ ОТПРАВЛЕНИЯ (точка А) нужны только точки приёма посылок.
+        # Фильтр НА НАШЕЙ стороне: сам Яндекс на параметр available_for_dropoff
+        # отвечает 400 «duplicated dropoff_option filters».
+        if dropoff:
+            points = [p for p in points if p.available_for_dropoff]
         data = [{"id": p.id, "name": p.name, "address": p.full_address} for p in points[:limit]]
         return JSONResponse({"ok": True, "env": c.env, "count": len(points), "points": data})
     except YandexDeliveryError as e:
@@ -723,9 +740,12 @@ def dostavka_set_pvz(
     pvz_id: str = Form(""),
 ):
     try:
-        buyers_sheet.set_pvz(phone, pvz_address, pvz_id)
-    except Exception:
-        pass
+        res = buyers_sheet.set_pvz(phone, pvz_address, pvz_id)
+        if not res.get("ok"):
+            return _op_msg(f"Не удалось записать ПВЗ: «{res.get('reason')}» "
+                          f"(телефон {phone or '—'} не найден в листе «Покупатели»).")
+    except Exception as e:
+        return _op_msg(f"Ошибка записи ПВЗ в лист: {e}")
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
