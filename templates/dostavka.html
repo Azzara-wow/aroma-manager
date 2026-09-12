@@ -227,14 +227,13 @@ document.getElementById('origin-search-btn').addEventListener('click', async fun
 // ФИО: заполняем модалку из data-атрибутов кнопки
 document.querySelectorAll('.js-fio').forEach(function (b) {
   b.addEventListener('click', function () {
-    fio_phone.value = b.dataset.phone || '';
-    fio_last.value = b.dataset.last || '';
-    fio_first.value = b.dataset.first || '';
-    fio_patr.value = b.dataset.patr || '';
-    fio_city.value = b.dataset.city || '';
+    document.getElementById('fio-phone').value = b.dataset.phone || '';
+    document.getElementById('fio-last').value = b.dataset.last || '';
+    document.getElementById('fio-first').value = b.dataset.first || '';
+    document.getElementById('fio-patr').value = b.dataset.patr || '';
+    document.getElementById('fio-city').value = b.dataset.city || '';
   });
 });
-// (id элементов доступны как глобальные переменные по их id)
 
 // ПВЗ: заполняем телефон/город, чистим прошлый результат
 document.querySelectorAll('.js-pvz').forEach(function (b) {
