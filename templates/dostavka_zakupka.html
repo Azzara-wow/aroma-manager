@@ -21,6 +21,10 @@
   Лист «Покупатели» недоступен ({{ sheet_error }}) — получатели/ПВЗ не подтянулись.</div>
 {% endif %}
 
+{% if msg %}
+<div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ msg }}</div>
+{% endif %}
+
 {% if not origin_pvz_id %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
   Не задан <strong>ПВЗ отправления</strong> — задай его на странице

@@ -763,7 +763,7 @@ def _delivery_block_reason(phone, rec):
 
 
 @app.get("/dostavka/zakupka/{zakupka_id}", response_class=HTMLResponse)
-def dostavka_zakupka(request: Request, zakupka_id: int):
+def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     """Превью массовой доставки по закупке: покупатель → телефон → получатель
     из листа → расчёт посылки (вес/коробка) → готовность. Без вызовов API."""
     from yandex_delivery import parcel
@@ -839,6 +839,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int):
         "sheet_error": sheet_error,
         "origin_pvz_id": origin_id,
         "origin_pvz_address": get_setting("origin_pvz_address", ""),
+        "msg": msg,
     })
 
 
@@ -870,26 +871,37 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
     import uuid
     from yandex_delivery import YandexDeliveryClient, parcel
 
+    from urllib.parse import quote
+
+    def _back(msg):
+        return RedirectResponse(
+            url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(msg)}", status_code=303)
+
     origin_id = get_setting("origin_pvz_id", "")
-    if not origin_id or not phones:
-        return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+    if not origin_id:
+        return _back("Не задан ПВЗ отправления (точка А) — задай его на странице «Доставки».")
+    if not phones:
+        return _back("Не отмечено ни одного получателя.")
 
     try:
         recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
-    except Exception:
-        recips = {}
+    except Exception as e:
+        return _back(f"Не удалось прочитать лист «Покупатели»: {e}")
 
     db = get_db()
     lines_by_phone = _zakupka_lines_by_phone(db, zakupka_id)
     client = YandexDeliveryClient()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+    created, skipped, errors = 0, 0, []
     for ph in set(phones):
         rec = recips.get(ph)
         if not rec or not rec.get("pvz_id") or not (rec.get("first_name") or rec.get("last_name")):
+            skipped += 1
             continue
         pair = lines_by_phone.get(ph)
         if not pair or not pair[0]:
+            skipped += 1
             continue
         lines, buyer_name = pair
         # уже есть активная доставка по этому телефону в этой закупке?
@@ -897,6 +909,7 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             "SELECT id FROM deliveries WHERE zakupka_id=? AND phone=? AND status IN ('offered','confirmed')",
             (zakupka_id, ph),
         ).fetchone():
+            skipped += 1
             continue
 
         opid = "luzi-" + uuid.uuid4().hex[:12]
@@ -922,6 +935,7 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             resp = client.create_offers(payload)
             offers = resp.get("offers") or []
             if not offers:
+                errors.append(f"{buyer_name}: нет вариантов доставки")
                 continue
             off = offers[0]
             det = off.get("offer_details") or {}
@@ -932,11 +946,19 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
                 (zakupka_id, buyer_name, ph, opid, off.get("offer_id", ""), price, "offered", now, now),
             )
             db.commit()
-        except Exception:
-            continue
+            created += 1
+        except YandexDeliveryError as e:
+            errors.append(f"{buyer_name}: {getattr(e, 'message', e)}")
+        except Exception as e:
+            errors.append(f"{buyer_name}: {e}")
 
     db.close()
-    return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}", status_code=303)
+    parts = [f"Создано черновиков: {created}"]
+    if skipped:
+        parts.append(f"пропущено (не готовы/уже есть): {skipped}")
+    if errors:
+        parts.append("ошибки — " + "; ".join(errors[:5]))
+    return _back(". ".join(parts))
 
 
 def _label_msg(text):
