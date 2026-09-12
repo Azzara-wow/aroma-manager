@@ -962,6 +962,20 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
     return _back(". ".join(parts))
 
 
+def _sync_sheet_tracking(db, phone):
+    """Синхронизировать колонку N листа: ставим ссылку АКТИВНОЙ (confirmed) доставки
+    этого телефона; если активной нет — очищаем (чтобы не висел трек отменённой)."""
+    row = db.execute(
+        "SELECT tracking_url FROM deliveries WHERE phone = ? AND status = 'confirmed' "
+        "AND tracking_url != '' ORDER BY id DESC LIMIT 1",
+        (phone,),
+    ).fetchone()
+    try:
+        buyers_sheet.set_tracking(phone, row["tracking_url"] if row else "")
+    except Exception:
+        pass
+
+
 @app.post("/dostavka/delivery/{delivery_id}/cancel")
 def dostavka_cancel(delivery_id: int):
     """Отмена доставки. Черновик (offered) — убираем локально (брони не было).
@@ -984,6 +998,7 @@ def dostavka_cancel(delivery_id: int):
     if not d.get("request_id") or d.get("status") == "offered":
         db.execute("DELETE FROM deliveries WHERE id = ?", (delivery_id,))
         db.commit()
+        _sync_sheet_tracking(db, d["phone"])
         db.close()
         return _back(f"Черновик «{d['buyer_name']}» убран (в Яндексе брони не было).")
 
@@ -998,6 +1013,7 @@ def dostavka_cancel(delivery_id: int):
         (datetime.now().strftime("%Y-%m-%d %H:%M"), delivery_id),
     )
     db.commit()
+    _sync_sheet_tracking(db, d["phone"])
     db.close()
     return _back(f"Доставка «{d['buyer_name']}» отменена в Яндексе.")
 
