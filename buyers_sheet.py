@@ -14,6 +14,7 @@ Google-листа, что заполняет витрина aroma_web. Пише�
 Колонки A–G принадлежат aroma_web (не трогаем их порядок). H–M — доставка.
 """
 import os
+import re
 from functools import lru_cache
 
 import gspread
@@ -224,9 +225,29 @@ def _canon_name(s):
     return " ".join((s or "").lower().replace("ё", "е").split())
 
 
+def phone_from_name(name):
+    """Извлечь телефон из имени вида «79022034755 - Оксана». Канон 7XXXXXXXXXX или ''.
+
+    Теперь витрина передаёт покупателя как «телефон - имя», поэтому телефон берём
+    прямо из строки — это точная привязка, без нечёткого совпадения по имени."""
+    s = str(name or "")
+    # телефон обычно в начале, до разделителя (-, —, |, , : ;)
+    head = re.split(r"[\-—|,:;]", s, 1)[0]
+    canon = normalize_phone(head)
+    if valid_phone(canon):
+        return canon
+    # запасной вариант: если во всей строке ровно один валидный номер
+    canon = normalize_phone(s)
+    return canon if valid_phone(canon) else ""
+
+
 def suggest_phone(name, recipients=None):
-    """Лучшее совпадение телефона из листа по имени покупателя закупки.
-    Возвращает канонический телефон или '' если уверенного совпадения нет."""
+    """Лучшее совпадение телефона по имени покупателя закупки. Канон или ''.
+    Приоритет — телефон ПРЯМО В ИМЕНИ («79022034755 - Оксана»), это точная привязка;
+    иначе падаем на нечёткое совпадение по имени со списком получателей."""
+    ph = phone_from_name(name)
+    if ph:
+        return ph
     recipients = recipients if recipients is not None else list_recipients()
     target = _canon_name(name)
     if not target:

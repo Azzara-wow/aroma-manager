@@ -8,12 +8,21 @@
         <h2><i class="bi bi-people"></i> Покупатели</h2>
     </div>
     <div class="col text-end">
+        <form method="POST" action="/buyers/autolink" class="d-inline">
+            <button class="btn btn-outline-success" type="submit"
+                    title="Проставить телефон всем, у кого он есть в имени (79… - Имя)">
+                <i class="bi bi-link-45deg"></i> Привязать по телефону из имени
+            </button>
+        </form>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addBuyerModal">
             <i class="bi bi-person-plus"></i> Добавить покупателя
         </button>
     </div>
 </div>
 
+{% if msg %}
+<div class="alert alert-success small"><i class="bi bi-check-circle"></i> {{ msg }}</div>
+{% endif %}
 {% if sheet_error %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
     Лист «Покупатели» недоступен ({{ sheet_error }}) — привязка по подсказке временно без автоподбора.</div>

@@ -531,7 +531,7 @@ async def reopen_zakupka(zakupka_id: int):
 
 # === Покупатели ===
 @app.get("/buyers", response_class=HTMLResponse)
-def buyers_list(request: Request):
+def buyers_list(request: Request, msg: str = ""):
     db = get_db()
     buyers_raw = db.execute("SELECT * FROM buyers ORDER BY name").fetchall()
     buyers = [row_to_dict(b) for b in buyers_raw]
@@ -561,6 +561,7 @@ def buyers_list(request: Request):
         "buyers": buyers,
         "pick_options": pick_options,
         "sheet_error": sheet_error,
+        "msg": msg,
     })
 
 
@@ -574,6 +575,29 @@ def link_buyer_phone(buyer_id: int = Form(...), phone: str = Form("")):
     db.commit()
     db.close()
     return RedirectResponse(url="/buyers", status_code=303)
+
+
+@app.post("/buyers/autolink")
+def buyers_autolink():
+    """Массово проставить телефон покупателям, у кого он есть в имени («79… - Имя»).
+    Уже привязанных не трогаем."""
+    import buyers_sheet
+    from urllib.parse import quote
+    db = get_db()
+    linked = 0
+    for b in db.execute("SELECT id, name, phone FROM buyers").fetchall():
+        if buyers_sheet.normalize_phone(b["phone"] or ""):
+            continue  # уже привязан вручную
+        ph = buyers_sheet.phone_from_name(b["name"] or "")
+        if ph:
+            db.execute("UPDATE buyers SET phone = ? WHERE id = ?", (ph, b["id"]))
+            linked += 1
+    db.commit()
+    db.close()
+    return RedirectResponse(
+        url=f"/buyers?msg={quote(f'Привязано по телефону из имени: {linked}')}",
+        status_code=303,
+    )
 
 
 @app.post("/buyers/add")
@@ -856,7 +880,8 @@ def _zakupka_lines_by_phone(db, zakupka_id):
     ).fetchall()
     out = {}
     for it in items:
-        ph = phone_by_name.get(it["buyer_name"], "")
+        # привязка вручную (buyers.phone) или телефон прямо из имени «7… - Имя»
+        ph = phone_by_name.get(it["buyer_name"], "") or buyers_sheet.phone_from_name(it["buyer_name"])
         if not ph:
             continue
         lines, _ = out.setdefault(ph, ([], it["buyer_name"]))
