@@ -109,16 +109,26 @@ def init_db():
             status TEXT DEFAULT '',
             barcode TEXT DEFAULT '',
             tracking_url TEXT DEFAULT '',
+            carrier TEXT DEFAULT 'yandex',
+            cdek_number TEXT DEFAULT '',
             created_at TEXT DEFAULT '',
             updated_at TEXT DEFAULT ''
         )
     ''')
 
-    # Миграция для уже существующих баз: добавляем tracking_url, если его нет.
+    # Миграции для уже существующих баз: добавляем недостающие колонки.
     try:
         c.execute("SELECT tracking_url FROM deliveries LIMIT 1")
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE deliveries ADD COLUMN tracking_url TEXT DEFAULT ''")
+    try:
+        c.execute("SELECT carrier FROM deliveries LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE deliveries ADD COLUMN carrier TEXT DEFAULT 'yandex'")
+    try:
+        c.execute("SELECT cdek_number FROM deliveries LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE deliveries ADD COLUMN cdek_number TEXT DEFAULT ''")
 
     # Включаем режим WAL — позволяет читать базу во время записи,
     # это заметно снижает шанс блокировок "database is locked"

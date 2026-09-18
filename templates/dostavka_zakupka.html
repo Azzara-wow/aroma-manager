@@ -25,32 +25,36 @@
 <div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ msg }}</div>
 {% endif %}
 
-{% if not origin_pvz_id %}
+{% if not origin_pvz_id and not origin_cdek_code %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
   Не задан <strong>ПВЗ отправления</strong> — задай его на странице
-  <a href="/dostavka">«Доставки»</a>, иначе создать заявки нельзя.</div>
+  <a href="/dostavka">«Доставки»</a> (для Яндекса и/или СДЭК), иначе создать заявки нельзя.</div>
 {% else %}
-<div class="text-muted small mb-2"><i class="bi bi-geo-alt-fill"></i>
-  Отправление: {{ origin_pvz_address or origin_pvz_id }}</div>
+<div class="text-muted small mb-2"><i class="bi bi-geo-alt-fill"></i> Отправление —
+  {% if origin_pvz_address %}Яндекс: {{ origin_pvz_address }}{% endif %}
+  {% if origin_cdek_address %}{% if origin_pvz_address %} · {% endif %}СДЭК: {{ origin_cdek_address }}{% endif %}
+</div>
 {% endif %}
 
 <form method="POST">
 <div class="card shadow-sm mb-3">
   <div class="card-body d-flex align-items-center gap-2 flex-wrap">
     <button class="btn btn-primary" formaction="/dostavka/zakupka/{{ zakupka.id }}/create"
-            {{ 'disabled' if not origin_pvz_id else '' }}>
+            {{ 'disabled' if not (origin_pvz_id or origin_cdek_code) else '' }}>
       <i class="bi bi-box-seam"></i> ① Создать доставки
     </button>
     <button class="btn btn-success" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm"
-            onclick="return confirm('Подтвердить отмеченные? Это РЕАЛЬНАЯ бронь доставки в Яндексе.')">
+            onclick="return confirm('Подтвердить отмеченные? Это РЕАЛЬНАЯ бронь доставки у перевозчика.')">
       <i class="bi bi-check2-circle"></i> ② Подтвердить отмеченные
     </button>
+    {% for cr in confirmed_carriers %}
     <a class="btn btn-outline-dark" target="_blank" formnovalidate
-       href="/dostavka/zakupka/{{ zakupka.id }}/labels" onclick="event.stopPropagation()">
-      <i class="bi bi-upc-scan"></i> ③ Печать ярлыков
+       href="/dostavka/zakupka/{{ zakupka.id }}/labels?carrier={{ cr }}" onclick="event.stopPropagation()">
+      <i class="bi bi-upc-scan"></i> ③ Ярлыки {{ 'Яндекс' if cr == 'yandex' else 'СДЭК' }}
     </a>
+    {% endfor %}
     <span class="text-muted small">
-      Отметь получателей → «Создать» (цена/черновик) → «Подтвердить» (бронь, request_id).
+      Отметь получателей → «Создать» → «Подтвердить» (бронь) → «Ярлыки».
     </span>
   </div>
 </div>
@@ -64,6 +68,7 @@
           <tr>
             <th></th>
             <th>Покупатель</th>
+            <th>ТК</th>
             <th>ФИО получателя</th>
             <th>Телефон</th>
             <th>ПВЗ назначения</th>
@@ -81,6 +86,10 @@
                      {{ 'checked' if r.ready else 'disabled' }}>
             </td>
             <td><strong>{{ r.buyer_name }}</strong></td>
+            <td>
+              {% if r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
+              {% else %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>{% endif %}
+            </td>
             <td>{{ r.fio or '—' }}</td>
             <td>{{ r.phone or '—' }}</td>
             <td><small>{{ r.pvz_address or '—' }}</small></td>
@@ -107,7 +116,7 @@
                 {% endif %}
                 <button class="btn btn-sm btn-outline-danger ms-1 py-0"
                         formaction="/dostavka/delivery/{{ r.delivery.id }}/cancel"
-                        onclick="return confirm('Отменить доставку «{{ r.buyer_name }}»?{% if r.delivery.status == 'confirmed' %} Это отменит РЕАЛЬНУЮ заявку в Яндексе.{% endif %}')">
+                        onclick="return confirm('Отменить доставку «{{ r.buyer_name }}»?{% if r.delivery.status == 'confirmed' %} Это отменит РЕАЛЬНУЮ заявку у перевозчика.{% endif %}')">
                   Отменить
                 </button>
               {% elif r.ready %}

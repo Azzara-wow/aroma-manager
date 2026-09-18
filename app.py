@@ -663,6 +663,8 @@ async def delete_buyer(buyer_id: int):
 import buyers_sheet
 from yandex_delivery import YandexDeliveryClient
 from yandex_delivery.errors import YandexDeliveryError
+from cdek_delivery import CdekClient
+from cdek_delivery.errors import CdekError
 
 
 @app.get("/dostavka", response_class=HTMLResponse)
@@ -692,14 +694,21 @@ def dostavka_list(request: Request):
         "zakupkas": zakupkas,
         "origin_pvz_address": get_setting("origin_pvz_address", ""),
         "origin_pvz_id": get_setting("origin_pvz_id", ""),
+        "origin_cdek_address": get_setting("origin_cdek_address", ""),
+        "origin_cdek_code": get_setting("origin_cdek_code", ""),
     })
 
 
 @app.post("/dostavka/origin")
-def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form("")):
-    """Сохранить ПВЗ отправления (точка А) в настройки."""
-    set_setting("origin_pvz_id", pvz_id.strip())
-    set_setting("origin_pvz_address", pvz_address.strip())
+def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form(""),
+                        carrier: str = Form("yandex")):
+    """Сохранить ПВЗ отправления (точка А) для перевозчика в настройки."""
+    if carrier == "cdek":
+        set_setting("origin_cdek_code", pvz_id.strip())
+        set_setting("origin_cdek_address", pvz_address.strip())
+    else:
+        set_setting("origin_pvz_id", pvz_id.strip())
+        set_setting("origin_pvz_address", pvz_address.strip())
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
@@ -734,24 +743,32 @@ def dostavka_set_fio(
 
 
 @app.get("/dostavka/pvz")
-def dostavka_pvz_search(city: str = "", limit: int = 30, dropoff: int = 0):
-    """JSON-поиск ПВЗ по городу для пикера в модалке.
-    dropoff=1 — только точки приёма посылок (для ПВЗ ОТПРАВЛЕНИЯ, точка А)."""
+def dostavka_pvz_search(city: str = "", limit: int = 40, dropoff: int = 0, carrier: str = "yandex"):
+    """JSON-поиск ПВЗ отправления по городу (для пикера точки А).
+    dropoff=1 — только точки приёма посылок. carrier=yandex|cdek."""
     city = (city or "").strip()
     if not city:
         return JSONResponse({"ok": False, "error": "Укажите город"})
     try:
-        c = YandexDeliveryClient()  # окружение из YANDEX_DELIVERY_ENV (по умолч. test)
+        if carrier == "cdek":
+            c = CdekClient()
+            code = c.city_code(city)
+            if not code:
+                return JSONResponse({"ok": False, "error": "Город не найден"})
+            # для отправления — точки ПРИЁМА (is_reception)
+            pts = c.list_pickup_points(city_code=code, is_reception=bool(dropoff) or None, size=300)
+            data = [{"id": p.code, "name": p.name or "ПВЗ", "address": p.address_full} for p in pts[:limit]]
+            return JSONResponse({"ok": True, "env": c.env, "count": len(pts), "points": data})
+        c = YandexDeliveryClient()
         gid = c.geo_id(city)
         points = c.list_pickup_points(geo_id=gid)
-        # Для ПВЗ ОТПРАВЛЕНИЯ (точка А) нужны только точки приёма посылок.
-        # Фильтр НА НАШЕЙ стороне: сам Яндекс на параметр available_for_dropoff
-        # отвечает 400 «duplicated dropoff_option filters».
+        # Для ПВЗ ОТПРАВЛЕНИЯ (точка А) нужны только точки приёма — фильтр на нашей
+        # стороне: Яндекс на параметр available_for_dropoff отвечает 400.
         if dropoff:
             points = [p for p in points if p.available_for_dropoff]
         data = [{"id": p.id, "name": p.name, "address": p.full_address} for p in points[:limit]]
         return JSONResponse({"ok": True, "env": c.env, "count": len(points), "points": data})
-    except YandexDeliveryError as e:
+    except (YandexDeliveryError, CdekError) as e:
         return JSONResponse({"ok": False, "error": str(e)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -807,8 +824,8 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
     deliveries = {}
     for d in db.execute(
-        "SELECT id, phone, status, price, request_id, tracking_url FROM deliveries "
-        "WHERE zakupka_id = ? AND status != 'cancelled'",
+        "SELECT id, phone, status, price, request_id, tracking_url, carrier, cdek_number "
+        "FROM deliveries WHERE zakupka_id = ? AND status != 'cancelled'",
         (zakupka_id,),
     ).fetchall():
         deliveries[d["phone"]] = row_to_dict(d)
@@ -828,7 +845,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
 
     rows = []
     for buyer_name, its in by_buyer.items():
-        phone = phones.get(buyer_name, "")
+        phone = phones.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
         rec = recips.get(phone) if phone else None
         lines = [
             parcel.ParcelLine(
@@ -844,6 +861,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "phone": phone,
             "fio": rec["fio"] if rec else "",
             "pvz_address": rec["pvz_address"] if rec else "",
+            "carrier": (rec.get("carrier") if rec else "") or "yandex",
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,
@@ -853,7 +871,11 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         })
     rows.sort(key=lambda x: (not x["ready"], x["buyer_name"].lower()))
     ready_count = sum(1 for r in rows if r["ready"])
-    origin_id = get_setting("origin_pvz_id", "")
+    # перевозчики среди подтверждённых — для кнопок печати ярлыков по каждому
+    confirmed_carriers = sorted({
+        (d.get("carrier") or "yandex") for d in deliveries.values()
+        if d.get("status") in ("confirmed", "labeled")
+    })
 
     return templates.TemplateResponse("dostavka_zakupka.html", {
         "request": request,
@@ -862,8 +884,11 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         "ready_count": ready_count,
         "total": len(rows),
         "sheet_error": sheet_error,
-        "origin_pvz_id": origin_id,
+        "origin_pvz_id": get_setting("origin_pvz_id", ""),
         "origin_pvz_address": get_setting("origin_pvz_address", ""),
+        "origin_cdek_code": get_setting("origin_cdek_code", ""),
+        "origin_cdek_address": get_setting("origin_cdek_address", ""),
+        "confirmed_carriers": confirmed_carriers,
         "msg": msg,
     })
 
@@ -893,31 +918,35 @@ def _zakupka_lines_by_phone(db, zakupka_id):
 
 @app.post("/dostavka/zakupka/{zakupka_id}/create")
 def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
-    """ШАГ ①: массовое offers/create по отмеченным готовым получателям."""
+    """ШАГ ①: черновики по отмеченным. Яндекс — offers/create (цена);
+    СДЭК — локальная пометка (реальный заказ создаётся при подтверждении)."""
     import uuid
+    import carriers
     from yandex_delivery import YandexDeliveryClient, parcel
-
+    from yandex_delivery.errors import YandexDeliveryError
     from urllib.parse import quote
 
     def _back(msg):
         return RedirectResponse(
             url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(msg)}", status_code=303)
 
-    origin_id = get_setting("origin_pvz_id", "")
-    if not origin_id:
-        return _back("Не задан ПВЗ отправления (точка А) — задай его на странице «Доставки».")
     if not phones:
         return _back("Не отмечено ни одного получателя.")
-
     try:
         recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
     except Exception as e:
         return _back(f"Не удалось прочитать лист «Покупатели»: {e}")
 
+    origin_y = get_setting("origin_pvz_id", "")
+    origin_c = get_setting("origin_cdek_code", "")
+
     db = get_db()
     lines_by_phone = _zakupka_lines_by_phone(db, zakupka_id)
-    client = YandexDeliveryClient()
+    yclient = YandexDeliveryClient()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    ins = ("INSERT INTO deliveries (zakupka_id, buyer_name, phone, operator_request_id, "
+           "offer_id, price, status, carrier, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
 
     created, skipped, errors = 0, 0, []
     for ph in set(phones):
@@ -930,7 +959,6 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             skipped += 1
             continue
         lines, buyer_name = pair
-        # уже есть активная доставка по этому телефону в этой закупке?
         if db.execute(
             "SELECT id FROM deliveries WHERE zakupka_id=? AND phone=? AND status IN ('offered','confirmed')",
             (zakupka_id, ph),
@@ -938,17 +966,33 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             skipped += 1
             continue
 
+        carrier = carriers.normalize(rec.get("carrier"))
         opid = "luzi-" + uuid.uuid4().hex[:12]
         calc = parcel.calc(lines, barcode=opid)
-        recipient = {"phone": "+" + ph}
-        recipient["first_name"] = rec.get("first_name") or rec.get("last_name") or "Получатель"
+
+        if carrier == "cdek":
+            if not origin_c:
+                errors.append(f"{buyer_name}: не задан ПВЗ отправления СДЭК")
+                continue
+            # СДЭК: заказ создаётся при подтверждении → сейчас только черновик-пометка
+            db.execute(ins, (zakupka_id, buyer_name, ph, opid, "", "", "offered", "cdek", now, now))
+            db.commit()
+            created += 1
+            continue
+
+        # Яндекс: offers/create (черновик + цена)
+        if not origin_y:
+            errors.append(f"{buyer_name}: не задан ПВЗ отправления Яндекс")
+            continue
+        recipient = {"phone": "+" + ph,
+                     "first_name": rec.get("first_name") or rec.get("last_name") or "Получатель"}
         if rec.get("last_name"):
             recipient["last_name"] = rec["last_name"]
         if rec.get("patronymic"):
             recipient["patronymic"] = rec["patronymic"]
         payload = {
             "info": {"operator_request_id": opid},
-            "source": {"platform_station": {"platform_id": origin_id}},
+            "source": {"platform_station": {"platform_id": origin_y}},
             "destination": {"type": "platform_station",
                             "platform_station": {"platform_id": rec["pvz_id"]}},
             "items": [i.to_dict() for i in calc.items],
@@ -958,7 +1002,7 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             "last_mile_policy": "self_pickup",
         }
         try:
-            resp = client.create_offers(payload)
+            resp = yclient.create_offers(payload)
             offers = resp.get("offers") or []
             if not offers:
                 errors.append(f"{buyer_name}: нет вариантов доставки")
@@ -966,11 +1010,8 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             off = offers[0]
             det = off.get("offer_details") or {}
             price = det.get("pricing_total") or det.get("pricing") or ""
-            db.execute(
-                "INSERT INTO deliveries (zakupka_id, buyer_name, phone, operator_request_id, "
-                "offer_id, price, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                (zakupka_id, buyer_name, ph, opid, off.get("offer_id", ""), price, "offered", now, now),
-            )
+            db.execute(ins, (zakupka_id, buyer_name, ph, opid,
+                             off.get("offer_id", ""), price, "offered", "yandex", now, now))
             db.commit()
             created += 1
         except YandexDeliveryError as e:
@@ -1027,10 +1068,11 @@ def dostavka_cancel(delivery_id: int):
         db.close()
         return _back(f"Черновик «{d['buyer_name']}» убран (в Яндексе брони не было).")
 
-    # Подтверждённая — отменяем в Яндексе.
+    # Подтверждённая — отменяем у перевозчика (Яндекс: request/cancel, СДЭК: delete_order).
+    import carriers
     try:
-        YandexDeliveryClient().cancel_request(d["request_id"])
-    except YandexDeliveryError as e:
+        carriers.cancel_delivery(d.get("carrier"), d["request_id"])
+    except Exception as e:
         db.close()
         return _back(f"Не удалось отменить «{d['buyer_name']}»: {getattr(e, 'message', e)}")
     db.execute(
@@ -1040,7 +1082,7 @@ def dostavka_cancel(delivery_id: int):
     db.commit()
     _sync_sheet_tracking(db, d["phone"])
     db.close()
-    return _back(f"Доставка «{d['buyer_name']}» отменена в Яндексе.")
+    return _back(f"Доставка «{d['buyer_name']}» отменена.")
 
 
 def _label_msg(text):
@@ -1052,111 +1094,100 @@ def _label_msg(text):
 
 
 @app.get("/dostavka/zakupka/{zakupka_id}/labels")
-def dostavka_labels(zakupka_id: int):
-    """Массовые ярлыки (PDF) по подтверждённым доставкам закупки.
-    В ярлыке Яндекса уже есть получатель — печатается рядом со штрих-кодом."""
-    from yandex_delivery import YandexDeliveryClient
-    from yandex_delivery.errors import ApiError
+def dostavka_labels(zakupka_id: int, carrier: str = ""):
+    """Массовые ярлыки (PDF) по подтверждённым доставкам ОДНОГО перевозчика.
+    carrier не задан → берём перевозчика подтверждённых (если он один)."""
+    import carriers
 
     db = get_db()
-    rows = db.execute(
-        "SELECT request_id FROM deliveries WHERE zakupka_id = ? "
+    rows = [row_to_dict(r) for r in db.execute(
+        "SELECT request_id, carrier FROM deliveries WHERE zakupka_id = ? "
         "AND status IN ('confirmed','labeled') AND request_id != ''",
         (zakupka_id,),
-    ).fetchall()
+    ).fetchall()]
     db.close()
-    ids = [r["request_id"] for r in rows]
-    if not ids:
+    if not rows:
         return _label_msg("Нет подтверждённых доставок. Сначала «Создать» и «Подтвердить».")
 
-    client = YandexDeliveryClient()
-
-    def _ready(all_ids):
-        out = []
-        for rid in all_ids:
-            try:
-                info = client.get_request_info(rid, as_model=False)
-                if (info.get("state") or {}).get("status"):
-                    out.append(rid)
-            except Exception:
-                pass
-        return out
+    present = sorted({carriers.normalize(r["carrier"]) for r in rows})
+    carrier = carriers.normalize(carrier) if carrier else present[0]
+    if carrier not in present:
+        return _label_msg(f"Нет подтверждённых доставок перевозчика {carrier}.")
+    ids = [r["request_id"] for r in rows if carriers.normalize(r["carrier"]) == carrier]
 
     try:
-        pdf = client.generate_labels(ids)
-    except ApiError as e:
-        if e.status_code == 409:
-            # часть заявок ещё не готова — печатаем только готовые
-            rids = _ready(ids)
-            if not rids:
-                return _label_msg("Ярлыки ещё готовятся у Яндекса (обычно меньше минуты после "
-                                  "подтверждения). Обнови страницу чуть позже.")
-            try:
-                pdf = client.generate_labels(rids)
-            except ApiError:
-                return _label_msg("Не удалось получить ярлыки, попробуй позже.")
-        else:
-            return _label_msg(f"Ошибка Яндекса: {e.message}")
+        pdf = carriers.labels_pdf(carrier, ids)
     except Exception as e:
-        return _label_msg(f"Сбой запроса: {e}")
+        return _label_msg(f"Ярлыки {carrier}: {e}")
 
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="labels_zakupka_{zakupka_id}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="labels_{carrier}_{zakupka_id}.pdf"'},
     )
 
 
 @app.post("/dostavka/zakupka/{zakupka_id}/confirm")
 def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
-    """ШАГ ②: подтверждение отмеченных черновиков (offers/confirm → request_id)."""
-    from yandex_delivery import YandexDeliveryClient
-
+    """ШАГ ②: реальная бронь отмеченных черновиков. Яндекс: offers/confirm;
+    СДЭК: create_order + опрос номера (заказ строится здесь из получателя и посылки)."""
+    import carriers
+    from yandex_delivery import parcel
     from urllib.parse import quote
 
     def _back(msg):
         return RedirectResponse(
             url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(msg)}", status_code=303)
 
-    client = YandexDeliveryClient()
     db = get_db()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     selected = set(phones)
-    rows = db.execute(
-        "SELECT id, offer_id, phone, buyer_name FROM deliveries "
-        "WHERE zakupka_id=? AND status='offered'",
-        (zakupka_id,),
-    ).fetchall()
+    rows = [r for r in db.execute(
+        "SELECT id, offer_id, phone, buyer_name, carrier, operator_request_id "
+        "FROM deliveries WHERE zakupka_id=? AND status='offered'", (zakupka_id,),
+    ).fetchall() if not selected or r["phone"] in selected]
+    if not rows:
+        db.close()
+        return _back("Нет отмеченных черновиков для подтверждения.")
+
+    # получатели + позиции нужны СДЭК (реальный заказ строится на этом шаге)
+    try:
+        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+    except Exception:
+        recips = {}
+    lines_by_phone = _zakupka_lines_by_phone(db, zakupka_id)
+    origin_y = get_setting("origin_pvz_id", "")
+    origin_c = get_setting("origin_cdek_code", "")
+
     confirmed, errors = 0, []
     for r in rows:
-        if selected and r["phone"] not in selected:
+        carrier = carriers.normalize(r["carrier"])
+        rec = recips.get(r["phone"])
+        pair = lines_by_phone.get(r["phone"])
+        calc = parcel.calc(pair[0], barcode=r["operator_request_id"]) if (pair and pair[0]) else None
+        if carrier == "cdek" and (not rec or not calc):
+            errors.append(f"{r['buyer_name']}: нет данных получателя/позиций для СДЭК")
             continue
-        try:
-            resp = client.confirm_offer(r["offer_id"])
-            rid = resp.get("request_id", "")
-            # ссылка отслеживания (sharing_url) — тянем сразу, если уже доступна
-            track = ""
+        origin_id = origin_c if carrier == "cdek" else origin_y
+
+        res = carriers.confirm_delivery(carrier, dict(r), rec, calc,
+                                        r["operator_request_id"], origin_id)
+        if not res.get("ok"):
+            errors.append(f"{r['buyer_name']}: {res.get('error')}")
+            continue
+        track = res.get("tracking", "")
+        db.execute(
+            "UPDATE deliveries SET request_id=?, cdek_number=?, status='confirmed', "
+            "tracking_url=?, updated_at=? WHERE id=?",
+            (res.get("request_id", ""), res.get("cdek_number", ""), track, now, r["id"]),
+        )
+        db.commit()
+        confirmed += 1
+        if track:  # покупатель увидит ссылку в витрине (лист «Покупатели», колонка N)
             try:
-                info = client.get_request_info(rid, as_model=False)
-                track = info.get("sharing_url", "") or ""
+                buyers_sheet.set_tracking(r["phone"], track)
             except Exception:
                 pass
-            db.execute(
-                "UPDATE deliveries SET request_id=?, status='confirmed', "
-                "tracking_url=?, updated_at=? WHERE id=?",
-                (rid, track, now, r["id"]),
-            )
-            db.commit()
-            confirmed += 1
-            if track:  # покупатель увидит ссылку в витрине (лист «Покупатели», колонка N)
-                try:
-                    buyers_sheet.set_tracking(r["phone"], track)
-                except Exception:
-                    pass
-        except YandexDeliveryError as e:
-            errors.append(f"{r['buyer_name']}: {getattr(e, 'message', e)}")
-        except Exception as e:
-            errors.append(f"{r['buyer_name']}: {e}")
     db.close()
     parts = [f"Подтверждено: {confirmed}"]
     if errors:
@@ -1166,7 +1197,8 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
 
 @app.post("/dostavka/delivery/{delivery_id}/track")
 def dostavka_refresh_track(delivery_id: int):
-    """Обновить ссылку отслеживания (sharing_url) из request/info."""
+    """Обновить ссылку отслеживания из API (по перевозчику)."""
+    import carriers
     from urllib.parse import quote
 
     db = get_db()
@@ -1184,12 +1216,12 @@ def dostavka_refresh_track(delivery_id: int):
         db.close()
         return _back("Ссылка появится после подтверждения заявки.")
     try:
-        info = YandexDeliveryClient().get_request_info(d["request_id"], as_model=False)
-        track = info.get("sharing_url", "") or ""
+        track, num = carriers.refresh_tracking(d.get("carrier"), d)
     except Exception as e:
         db.close()
         return _back(f"Не удалось получить ссылку: {e}")
-    db.execute("UPDATE deliveries SET tracking_url = ? WHERE id = ?", (track, delivery_id))
+    db.execute("UPDATE deliveries SET tracking_url=?, cdek_number=? WHERE id=?",
+               (track, num or d.get("cdek_number", ""), delivery_id))
     db.commit()
     db.close()
     if track:
@@ -1198,7 +1230,7 @@ def dostavka_refresh_track(delivery_id: int):
         except Exception:
             pass
     return _back("Ссылка отслеживания обновлена." if track
-                 else "Яндекс пока не отдал ссылку — попробуй чуть позже.")
+                 else "Номер/ссылка ещё готовится — попробуй чуть позже.")
 
 
 # === Заказы с наличия ===

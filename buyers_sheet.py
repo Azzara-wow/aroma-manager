@@ -36,7 +36,8 @@ KEY_PATHS = [
 # индексы столбцов
 COL_PHONE, COL_NAME, COL_CODE, COL_ADDRESS, COL_ROLE, COL_CREATED, COL_NOTE = range(7)
 COL_LAST, COL_FIRST, COL_PATR, COL_CITY, COL_PVZ_ADDR, COL_PVZ_ID = range(7, 13)
-COL_TRACKING = 13  # N — ссылка отслеживания Яндекса (пишет дашборд после подтверждения)
+COL_TRACKING = 13  # N — ссылка отслеживания (пишет дашборд после подтверждения)
+COL_CARRIER = 14   # O — перевозчик выбранного ПВЗ: yandex | cdek (пишет витрина)
 
 
 def _key_path():
@@ -119,6 +120,7 @@ def _row_to_recipient(row, idx):
         "city": _cell(row, COL_CITY),
         "pvz_address": _cell(row, COL_PVZ_ADDR),
         "pvz_id": pvz_id,
+        "carrier": (_cell(row, COL_CARRIER) or "yandex").lower(),
         # готов к доставке: валидный телефон + имя (или фамилия) + выбран ПВЗ
         "delivery_ready": bool(valid_phone(phone) and (first or last) and pvz_id),
     }
