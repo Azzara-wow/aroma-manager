@@ -12,17 +12,57 @@ cdek_delivery. Хендлеры /dostavka ветвятся по carrier ('yandex
 import os
 import re
 import time
+from dataclasses import dataclass
+from typing import Optional
 
 CDEK_TARIFF_PVZ = 136  # посылка склад-склад (ПВЗ→ПВЗ)
+
+
+@dataclass
+class DeliveryConfig:
+    """Контекст одного отправителя (арендатора). Всё, что раньше бралось из общего
+    .env, теперь можно передать явно — так движок перестаёт быть привязан к одному
+    продавцу и готов принимать доступы клиента (личный кабинет → эта структура).
+
+    Любое поле None → значение берётся из окружения/.env, как раньше (обратная
+    совместимость: без cfg всё работает по-старому)."""
+    # доступы перевозчиков
+    yandex_token: Optional[str] = None
+    yandex_env: Optional[str] = None        # 'test' | 'prod'
+    cdek_account: Optional[str] = None
+    cdek_secure: Optional[str] = None
+    cdek_env: Optional[str] = None          # 'test' | 'prod'
+    # ПВЗ отправления по перевозчикам
+    origin_yandex: Optional[str] = None
+    origin_cdek: Optional[str] = None
+    # кто платит доставку: 'seller' | 'recipient'
+    paid_by: Optional[str] = None
+
+
+def _yandex_client(cfg: Optional[DeliveryConfig] = None):
+    """Клиент Яндекса с доступами клиента (или из .env, если cfg не задан)."""
+    from yandex_delivery import YandexDeliveryClient
+    return YandexDeliveryClient(env=getattr(cfg, "yandex_env", None),
+                                token=getattr(cfg, "yandex_token", None))
+
+
+def _cdek_client(cfg: Optional[DeliveryConfig] = None):
+    """Клиент СДЭК с доступами клиента (или из .env, если cfg не задан)."""
+    from cdek_delivery import CdekClient
+    return CdekClient(env=getattr(cfg, "cdek_env", None),
+                      account=getattr(cfg, "cdek_account", None),
+                      secure=getattr(cfg, "cdek_secure", None))
 
 
 def normalize(carrier):
     return "cdek" if str(carrier or "").lower() == "cdek" else "yandex"
 
 
-def paid_by():
+def paid_by(cfg: Optional[DeliveryConfig] = None):
     """'recipient' — доставку оплачивает покупатель (наложенный платёж); иначе 'seller'.
-    Общий флаг витрины и дашборда из окружения/.env (DELIVERY_PAID_BY)."""
+    Приоритет — значение из cfg (личный кабинет клиента); иначе общий флаг из .env."""
+    if cfg is not None and cfg.paid_by:
+        return cfg.paid_by.lower()
     try:
         from yandex_delivery import config as ycfg
         ycfg._load_dotenv()
@@ -41,19 +81,19 @@ def price_to_kopecks(price_str):
 #  ПОДТВЕРЖДЕНИЕ (реальная бронь)
 # ====================================================================
 
-def confirm_delivery(carrier, row, rec, calc, opid, origin_id):
+def confirm_delivery(carrier, row, rec, calc, opid, origin_id, cfg=None):
     """Забронировать доставку. Возвращает dict:
-        {ok, request_id, cdek_number, tracking, price, error}."""
+        {ok, request_id, cdek_number, tracking, price, error}.
+    cfg (DeliveryConfig) — доступы отправителя; None → из .env (как раньше)."""
     if normalize(carrier) == "cdek":
-        return _cdek_book(rec, calc, opid, origin_id)
-    return _yandex_confirm(row)
+        return _cdek_book(rec, calc, opid, origin_id, cfg)
+    return _yandex_confirm(row, cfg)
 
 
-def _yandex_confirm(row):
-    from yandex_delivery import YandexDeliveryClient
+def _yandex_confirm(row, cfg=None):
     from yandex_delivery.errors import YandexDeliveryError
     try:
-        c = YandexDeliveryClient()
+        c = _yandex_client(cfg)
         resp = c.confirm_offer(row["offer_id"])
         rid = resp.get("request_id", "")
         track = ""
@@ -90,13 +130,12 @@ def _cdek_delivery_price(c, origin_code, rec, calc):
         return 0
 
 
-def _cdek_book(rec, calc, opid, origin_code):
-    from cdek_delivery import CdekClient
+def _cdek_book(rec, calc, opid, origin_code, cfg=None):
     from cdek_delivery.errors import CdekError
     try:
-        c = CdekClient()
+        c = _cdek_client(cfg)
         recipient_cost = None
-        if paid_by() == "recipient":
+        if paid_by(cfg) == "recipient":
             price = _cdek_delivery_price(c, origin_code, rec, calc)
             if not price:
                 return {"ok": False,
@@ -167,14 +206,12 @@ def _cdek_order_payload(rec, calc, opid, origin_code, recipient_cost=None):
 #  ОТМЕНА
 # ====================================================================
 
-def cancel_delivery(carrier, request_id):
+def cancel_delivery(carrier, request_id, cfg=None):
     """Отменить бронь у перевозчика (request_id: Яндекс — request_id, СДЭК — uuid заказа)."""
     if normalize(carrier) == "cdek":
-        from cdek_delivery import CdekClient
-        CdekClient().delete_order(request_id)
+        _cdek_client(cfg).delete_order(request_id)
     else:
-        from yandex_delivery import YandexDeliveryClient
-        YandexDeliveryClient().cancel_request(request_id)
+        _yandex_client(cfg).cancel_request(request_id)
 
 
 # ====================================================================
@@ -185,16 +222,14 @@ def cdek_tracking(cdek_number):
     return f"https://www.cdek.ru/ru/tracking?order_id={cdek_number}" if cdek_number else ""
 
 
-def refresh_tracking(carrier, row):
+def refresh_tracking(carrier, row, cfg=None):
     """Обновить ссылку отслеживания из API. → '' если ещё не готова."""
     if normalize(carrier) == "cdek":
-        from cdek_delivery import CdekClient
-        info = CdekClient().get_order(row["request_id"])
+        info = _cdek_client(cfg).get_order(row["request_id"])
         num = (info.get("entity") or {}).get("cdek_number") or row.get("cdek_number") or ""
         return cdek_tracking(num), num
     else:
-        from yandex_delivery import YandexDeliveryClient
-        info = YandexDeliveryClient().get_request_info(row["request_id"], as_model=False)
+        info = _yandex_client(cfg).get_request_info(row["request_id"], as_model=False)
         return (info.get("sharing_url", "") or ""), ""
 
 
@@ -202,11 +237,10 @@ def refresh_tracking(carrier, row):
 #  ЯРЛЫКИ (PDF)
 # ====================================================================
 
-def labels_pdf(carrier, request_ids):
+def labels_pdf(carrier, request_ids, cfg=None):
     """PDF ярлыков/ШК для списка заявок ОДНОГО перевозчика (request_ids — их id)."""
     if normalize(carrier) == "cdek":
-        from cdek_delivery import CdekClient
-        c = CdekClient()
+        c = _cdek_client(cfg)
         # задание на печать ШК → uuid → PDF
         resp = c.print_barcodes({"orders": [{"order_uuid": u} for u in request_ids]})
         u = (resp.get("entity") or {}).get("uuid", "")
@@ -220,9 +254,8 @@ def labels_pdf(carrier, request_ids):
                 continue
         raise RuntimeError("СДЭК ещё готовит ШК, попробуй позже")
     else:
-        from yandex_delivery import YandexDeliveryClient
         from yandex_delivery.errors import ApiError
-        c = YandexDeliveryClient()
+        c = _yandex_client(cfg)
         try:
             return c.generate_labels(request_ids)
         except ApiError as e:
