@@ -9,6 +9,8 @@ cdek_delivery. Хендлеры /dostavka ветвятся по carrier ('yandex
 у СДЭК заказ создаётся сразу при подтверждении, поэтому «Создать» для СДЭК —
 локальная пометка (без вызова API), а вся работа в confirm.
 """
+import os
+import re
 import time
 
 CDEK_TARIFF_PVZ = 136  # посылка склад-склад (ПВЗ→ПВЗ)
@@ -16,6 +18,23 @@ CDEK_TARIFF_PVZ = 136  # посылка склад-склад (ПВЗ→ПВЗ)
 
 def normalize(carrier):
     return "cdek" if str(carrier or "").lower() == "cdek" else "yandex"
+
+
+def paid_by():
+    """'recipient' — доставку оплачивает покупатель (наложенный платёж); иначе 'seller'.
+    Общий флаг витрины и дашборда из окружения/.env (DELIVERY_PAID_BY)."""
+    try:
+        from yandex_delivery import config as ycfg
+        ycfg._load_dotenv()
+    except Exception:
+        pass
+    return os.environ.get("DELIVERY_PAID_BY", "seller").lower()
+
+
+def price_to_kopecks(price_str):
+    """'184.83 RUB' → 18483 (копейки). Пусто/None → 0."""
+    m = re.search(r"\d+[.,]?\d*", str(price_str or ""))
+    return int(round(float(m.group(0).replace(",", ".")) * 100)) if m else 0
 
 
 # ====================================================================
@@ -50,12 +69,40 @@ def _yandex_confirm(row):
         return {"ok": False, "error": str(e)}
 
 
+def _cdek_delivery_price(c, origin_code, rec, calc):
+    """Стоимость доставки СДЭК (₽, целое) через calculator/tariff. 0 — если не вышло.
+    Города берём: получателя — из rec['city'], отправления — по коду ПВЗ отправления."""
+    try:
+        to_code = c.city_code(rec.get("city", "")) if rec.get("city") else None
+        from_pts = c.list_pickup_points(type=None, extra={"code": origin_code})
+        from_code = from_pts[0].city_code if from_pts else None
+        if not (to_code and from_code):
+            return 0
+        resp = c.calculate_tariff({
+            "tariff_code": CDEK_TARIFF_PVZ,
+            "from_location": {"code": from_code},
+            "to_location": {"code": to_code},
+            "packages": [{"weight": calc.weight_g}],
+        })
+        val = resp.get("total_sum") or resp.get("delivery_sum") or 0
+        return int(round(float(val))) if val else 0
+    except Exception:
+        return 0
+
+
 def _cdek_book(rec, calc, opid, origin_code):
     from cdek_delivery import CdekClient
     from cdek_delivery.errors import CdekError
     try:
         c = CdekClient()
-        payload = _cdek_order_payload(rec, calc, opid, origin_code)
+        recipient_cost = None
+        if paid_by() == "recipient":
+            price = _cdek_delivery_price(c, origin_code, rec, calc)
+            if not price:
+                return {"ok": False,
+                        "error": "СДЭК: не удалось рассчитать стоимость доставки для наложенного платежа"}
+            recipient_cost = price
+        payload = _cdek_order_payload(rec, calc, opid, origin_code, recipient_cost)
         resp = c.create_order(payload)
         u = (resp.get("entity") or {}).get("uuid", "")
         if not u:
@@ -73,15 +120,17 @@ def _cdek_book(rec, calc, opid, origin_code):
             if num:
                 break
         return {"ok": True, "request_id": u, "cdek_number": num,
-                "tracking": cdek_tracking(num)}
+                "tracking": cdek_tracking(num),
+                "price": (f"{recipient_cost} RUB" if recipient_cost else "")}
     except CdekError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def _cdek_order_payload(rec, calc, opid, origin_code):
-    """Собрать тело POST /v2/orders для ПВЗ→ПВЗ (тариф склад-склад)."""
+def _cdek_order_payload(rec, calc, opid, origin_code, recipient_cost=None):
+    """Собрать тело POST /v2/orders для ПВЗ→ПВЗ (тариф склад-склад).
+    recipient_cost (₽) — если задан, доставку оплачивает получатель (наложенный платёж)."""
     box = calc.box
     n = max(1, len(calc.items))
     per_w = max(1, calc.weight_g // n)
@@ -96,7 +145,7 @@ def _cdek_order_payload(rec, calc, opid, origin_code):
             "amount": it.count,
         })
     fio = (rec.get("fio") or rec.get("first_name") or rec.get("last_name") or "Получатель")
-    return {
+    body = {
         "type": 1,
         "tariff_code": CDEK_TARIFF_PVZ,
         "shipment_point": origin_code,
@@ -109,6 +158,9 @@ def _cdek_order_payload(rec, calc, opid, origin_code):
             "items": items,
         }],
     }
+    if recipient_cost:  # доставку оплачивает получатель на ПВЗ (наложенный платёж)
+        body["delivery_recipient_cost"] = {"value": recipient_cost}
+    return body
 
 
 # ====================================================================

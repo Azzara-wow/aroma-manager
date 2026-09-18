@@ -25,6 +25,12 @@
 <div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ msg }}</div>
 {% endif %}
 
+<div class="small mb-2">
+  Доставку оплачивает:
+  {% if paid_by == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
+  {% else %}<span class="badge bg-secondary">продавец</span>{% endif %}
+</div>
+
 {% if not origin_pvz_id and not origin_cdek_code %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
   Не задан <strong>ПВЗ отправления</strong> — задай его на странице

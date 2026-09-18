@@ -889,6 +889,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         "origin_cdek_code": get_setting("origin_cdek_code", ""),
         "origin_cdek_address": get_setting("origin_cdek_address", ""),
         "confirmed_carriers": confirmed_carriers,
+        "paid_by": __import__("carriers").paid_by(),
         "msg": msg,
     })
 
@@ -1010,8 +1011,21 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             off = offers[0]
             det = off.get("offer_details") or {}
             price = det.get("pricing_total") or det.get("pricing") or ""
+            offer_id = off.get("offer_id", "")
+            # Покупатель платит доставку → пересоздаём оффер с наложенным платежом
+            # (сумму знаем только после первого оффера).
+            if carriers.paid_by() == "recipient":
+                payload["info"]["operator_request_id"] = opid + "-cod"
+                payload["billing_info"] = {"payment_method": "card_on_receipt",
+                                           "delivery_cost": carriers.price_to_kopecks(price)}
+                r2 = yclient.create_offers(payload)
+                o2 = (r2.get("offers") or [{}])[0]
+                if not o2.get("offer_id"):
+                    errors.append(f"{buyer_name}: наложка не оформилась")
+                    continue
+                offer_id = o2["offer_id"]
             db.execute(ins, (zakupka_id, buyer_name, ph, opid,
-                             off.get("offer_id", ""), price, "offered", "yandex", now, now))
+                             offer_id, price, "offered", "yandex", now, now))
             db.commit()
             created += 1
         except YandexDeliveryError as e:
@@ -1176,11 +1190,19 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
             errors.append(f"{r['buyer_name']}: {res.get('error')}")
             continue
         track = res.get("tracking", "")
-        db.execute(
-            "UPDATE deliveries SET request_id=?, cdek_number=?, status='confirmed', "
-            "tracking_url=?, updated_at=? WHERE id=?",
-            (res.get("request_id", ""), res.get("cdek_number", ""), track, now, r["id"]),
-        )
+        if res.get("price"):
+            db.execute(
+                "UPDATE deliveries SET request_id=?, cdek_number=?, status='confirmed', "
+                "tracking_url=?, price=?, updated_at=? WHERE id=?",
+                (res.get("request_id", ""), res.get("cdek_number", ""), track,
+                 res["price"], now, r["id"]),
+            )
+        else:
+            db.execute(
+                "UPDATE deliveries SET request_id=?, cdek_number=?, status='confirmed', "
+                "tracking_url=?, updated_at=? WHERE id=?",
+                (res.get("request_id", ""), res.get("cdek_number", ""), track, now, r["id"]),
+            )
         db.commit()
         confirmed += 1
         if track:  # покупатель увидит ссылку в витрине (лист «Покупатели», колонка N)
