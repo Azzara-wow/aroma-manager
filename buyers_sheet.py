@@ -120,7 +120,9 @@ def _row_to_recipient(row, idx):
         "city": _cell(row, COL_CITY),
         "pvz_address": _cell(row, COL_PVZ_ADDR),
         "pvz_id": pvz_id,
-        "carrier": (_cell(row, COL_CARRIER) or "yandex").lower(),
+        # перевозчик — как выбрал покупатель в витрине (пусто, пока не выбрал);
+        # для отправки пустое трактуем как Яндекс уже на этапе диспетчеризации
+        "carrier": _cell(row, COL_CARRIER).lower(),
         # готов к доставке: валидный телефон + имя (или фамилия) + выбран ПВЗ
         "delivery_ready": bool(valid_phone(phone) and (first or last) and pvz_id),
     }

@@ -861,7 +861,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "phone": phone,
             "fio": rec["fio"] if rec else "",
             "pvz_address": rec["pvz_address"] if rec else "",
-            "carrier": (rec.get("carrier") if rec else "") or "yandex",
+            "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,

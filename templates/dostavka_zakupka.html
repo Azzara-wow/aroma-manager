@@ -88,7 +88,8 @@
             <td><strong>{{ r.buyer_name }}</strong></td>
             <td>
               {% if r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
-              {% else %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>{% endif %}
+              {% elif r.carrier == 'yandex' %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>
+              {% endif %}
             </td>
             <td>{{ r.fio or '—' }}</td>
             <td>{{ r.phone or '—' }}</td>
