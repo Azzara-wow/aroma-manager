@@ -37,7 +37,7 @@ class Box:
     max_weight_g: int
 
 
-# Стандартные коробки Яндекса (пока ориентируемся на них).
+# Стандартные коробки Яндекса — ОРИЕНТИР по весу (весовые ступени).
 BOXES = [
     Box("XS", "Размер XS", 17, 12, 9, 500),
     Box("S", "Размер S", 25, 15, 10, 2000),
@@ -46,11 +46,46 @@ BOXES = [
     Box("XL", "Размер XL", 60, 40, 45, 20000),
 ]
 
+# РЕАЛЬНЫЕ коробки поставщика (см). Это то, во что реально пакуем и что уходит
+# перевозчику. Дробные 13,5 округлены вверх до 14 для габаритов заявки (в названии —
+# как есть). max_weight не ограничиваем (вес тут ни при чём — важен объём/что влезет).
+# Порядок — по возрастанию объёма (для выпадашки).
+_BIG = 10 ** 9
+SUPPLIER_BOXES = [
+    Box("13.5x13.5x10", "13,5×13,5×10", 14, 14, 10, _BIG),
+    Box("17x17x10", "17×17×10", 17, 17, 10, _BIG),
+    Box("15x15x15", "15×15×15", 15, 15, 15, _BIG),
+    Box("13.5x13.5x20", "13,5×13,5×20", 14, 14, 20, _BIG),
+    Box("20x20x10", "20×20×10", 20, 20, 10, _BIG),
+    Box("20x15x20", "20×15×20", 20, 15, 20, _BIG),
+    Box("20x20x20", "20×20×20", 20, 20, 20, _BIG),
+    Box("25x25x15", "25×25×15", 25, 25, 15, _BIG),
+    Box("36x20x20", "36×20×20", 36, 20, 20, _BIG),
+    Box("40x20x20", "40×20×20", 40, 20, 20, _BIG),
+]
+
 # ================= КОНЕЦ ТАБЛИЦ =================
 
 # коробки по возрастанию грузоподъёмности — для авто-подбора наименьшей подходящей
 _BOXES_BY_CAPACITY = sorted(BOXES, key=lambda b: b.max_weight_g)
 _BOXES_BY_CODE = {b.code.upper(): b for b in BOXES}
+_SUPPLIER_BY_CODE = {b.code: b for b in SUPPLIER_BOXES}
+
+
+def _box_volume(b: Box) -> int:
+    return b.dx * b.dy * b.dz
+
+
+def nearest_supplier_box(ref_box: Box) -> Box:
+    """Ближайшая по объёму коробка поставщика к весовому ориентиру Яндекса.
+    Так связка «вес → размер Яндекса → близкий размер поставщика» сохраняется."""
+    v = _box_volume(ref_box)
+    return min(SUPPLIER_BOXES, key=lambda b: abs(_box_volume(b) - v))
+
+
+def get_supplier_box(code) -> Optional[Box]:
+    """Коробка поставщика по коду (для ручной смены). Нет кода/пусто → None (авто)."""
+    return _SUPPLIER_BY_CODE.get(code) if code else None
 
 
 @dataclass
@@ -66,9 +101,10 @@ class ParcelLine:
 class ParcelCalc:
     """Результат расчёта посылки."""
     weight_g: int
-    box: Box
+    box: Box              # РЕАЛЬНАЯ коробка поставщика (её габариты уходят перевозчику)
     place: Place
     items: List[Item]
+    yandex_ref: Optional[Box] = None  # весовой ориентир Яндекса (для UI)
 
 
 def _flacons_for_volume(volume_ml: int):
@@ -112,16 +148,19 @@ def choose_box(weight_g: int) -> Box:
 
 
 def calc(lines: List[ParcelLine], barcode: str, box: Optional[Box] = None) -> ParcelCalc:
-    """Полный расчёт: вес → коробка (или заданная) → place + items для API.
+    """Полный расчёт: вес → ориентир Яндекса → коробка поставщика → place + items.
 
     barcode связывает грузоместо и товары внутри него.
-    box=None → коробка подбирается автоматически по весу.
+    box (коробка поставщика) задан → берём его (ручной выбор); иначе подбираем
+    ближайшую по объёму к весовому ориентиру Яндекса.
     """
     weight = parcel_weight_g(lines)
-    box = box or choose_box(weight)
-    place = Place(barcode=barcode, dimensions=Dimensions(weight, box.dx, box.dy, box.dz))
+    yandex_ref = choose_box(weight)          # весовая ступень (ориентир)
+    box = box or nearest_supplier_box(yandex_ref)  # реальная коробка поставщика
+    place = Place(barcode=barcode,
+                  dimensions=Dimensions(weight, round(box.dx), round(box.dy), round(box.dz)))
     items = [
         Item(name=l.name, count=l.count, place_barcode=barcode, unit_price=l.unit_price)
         for l in lines
     ]
-    return ParcelCalc(weight_g=weight, box=box, place=place, items=items)
+    return ParcelCalc(weight_g=weight, box=box, place=place, items=items, yandex_ref=yandex_ref)

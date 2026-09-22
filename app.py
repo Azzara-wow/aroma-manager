@@ -854,7 +854,9 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             )
             for it in its
         ]
-        calc = parcel.calc(lines, barcode=f"Z{zakupka_id}-{phone or buyer_name}")
+        box_override = get_setting(f"box:{zakupka_id}:{phone}", "") if phone else ""
+        calc = parcel.calc(lines, barcode=f"Z{zakupka_id}-{phone or buyer_name}",
+                           box=parcel.get_supplier_box(box_override))
         reason = _delivery_block_reason(phone, rec)
         rows.append({
             "buyer_name": buyer_name,
@@ -864,7 +866,10 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
             "positions": len(its),
             "weight_g": calc.weight_g,
-            "box": calc.box.code,
+            "box": calc.box.code,                         # выбранная коробка поставщика
+            "box_name": calc.box.name,
+            "box_yandex": calc.yandex_ref.code if calc.yandex_ref else "",
+            "box_manual": bool(box_override),             # выбрана вручную
             "ready": (reason == ""),
             "reason": reason,
             "delivery": deliveries.get(phone),
@@ -890,8 +895,20 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         "origin_cdek_address": get_setting("origin_cdek_address", ""),
         "confirmed_carriers": confirmed_carriers,
         "paid_by": __import__("carriers").paid_by(),
+        "supplier_boxes": [{"code": b.code, "name": b.name} for b in parcel.SUPPLIER_BOXES],
         "msg": msg,
     })
+
+
+@app.post("/dostavka/zakupka/{zakupka_id}/box")
+def dostavka_set_box(zakupka_id: int, phone: str = Form(...), box: str = Form(...)):
+    """Ручная смена коробки поставщика для получателя. Пусто → сброс на авто-подбор."""
+    from yandex_delivery import parcel
+    box = (box or "").strip()
+    if box and parcel.get_supplier_box(box) is None:
+        return JSONResponse({"ok": False, "error": "неизвестная коробка"}, status_code=400)
+    set_setting(f"box:{zakupka_id}:{phone.strip()}", box)
+    return JSONResponse({"ok": True, "manual": bool(box)})
 
 
 def _zakupka_lines_by_phone(db, zakupka_id):
@@ -969,7 +986,8 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
 
         carrier = carriers.normalize(rec.get("carrier"))
         opid = "luzi-" + uuid.uuid4().hex[:12]
-        calc = parcel.calc(lines, barcode=opid)
+        box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{ph}", ""))
+        calc = parcel.calc(lines, barcode=opid, box=box)
 
         if carrier == "cdek":
             if not origin_c:
@@ -1178,7 +1196,8 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
         carrier = carriers.normalize(r["carrier"])
         rec = recips.get(r["phone"])
         pair = lines_by_phone.get(r["phone"])
-        calc = parcel.calc(pair[0], barcode=r["operator_request_id"]) if (pair and pair[0]) else None
+        _box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{r['phone']}", ""))
+        calc = parcel.calc(pair[0], barcode=r["operator_request_id"], box=_box) if (pair and pair[0]) else None
         if carrier == "cdek" and (not rec or not calc):
             errors.append(f"{r['buyer_name']}: нет данных получателя/позиций для СДЭК")
             continue

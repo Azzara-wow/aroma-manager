@@ -102,7 +102,20 @@
             <td><small>{{ r.pvz_address or '—' }}</small></td>
             <td>{{ r.positions }}</td>
             <td>{{ r.weight_g }}</td>
-            <td><span class="badge bg-light text-dark border">{{ r.box }}</span></td>
+            <td style="min-width:11rem">
+              {% if r.phone %}
+              <select class="form-select form-select-sm js-box" data-phone="{{ r.phone }}">
+                {% for b in supplier_boxes %}
+                <option value="{{ b.code }}" {{ 'selected' if b.code == r.box else '' }}>{{ b.name }}</option>
+                {% endfor %}
+              </select>
+              <div class="small text-muted">
+                Яндекс-ориентир: {{ r.box_yandex }}{% if r.box_manual %} · <span class="text-primary">вручную</span>{% endif %}
+              </div>
+              {% else %}
+              <span class="badge bg-light text-dark border">{{ r.box_name }}</span>
+              {% endif %}
+            </td>
             <td>
               {% if r.delivery %}
                 {% if r.delivery.status == 'confirmed' %}
@@ -143,4 +156,31 @@
   </div>
 </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Ручная смена коробки поставщика — сохраняем сразу, без перезагрузки.
+// select'ы намеренно БЕЗ name, поэтому в форму «Создать/Подтвердить» не попадают.
+document.querySelectorAll('.js-box').forEach(function (sel) {
+  sel.addEventListener('change', function () {
+    var fd = new FormData();
+    fd.append('phone', sel.dataset.phone);
+    fd.append('box', sel.value);
+    sel.disabled = true;
+    fetch('/dostavka/zakupka/{{ zakupka.id }}/box', { method: 'POST', body: fd })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        sel.style.borderColor = d.ok ? '#198754' : '#dc3545';
+        var hint = sel.parentElement.querySelector('.small');
+        if (d.ok && hint) {
+          hint.innerHTML = hint.innerHTML.split(' · ')[0] +
+            (d.manual ? ' · <span class="text-primary">вручную</span>' : '');
+        }
+      })
+      .catch(function () { sel.style.borderColor = '#dc3545'; })
+      .finally(function () { sel.disabled = false; });
+  });
+});
+</script>
 {% endblock %}
