@@ -122,6 +122,17 @@
                     </div>
                 </div>
 
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="rozliv">
+                    <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
+                           placeholder="🔍 Фамилия или аромат…">
+                    <div class="btn-group btn-group-sm tab-filters" role="group">
+                        <button type="button" class="btn btn-outline-secondary active" data-filter="all">Все</button>
+                        <button type="button" class="btn btn-outline-success" data-filter="done">Разлитые</button>
+                        <button type="button" class="btn btn-outline-secondary" data-filter="todo">Не разлитые</button>
+                    </div>
+                    <span class="text-muted small tab-count ms-auto"></span>
+                </div>
+
                 <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                     <table class="table table-hover">
                         <thead>
@@ -134,7 +145,9 @@
                         </thead>
                         <tbody>
                             {% for item in rozliv_items %}
-                            <tr class="{% if item.rozliv == 1 %}table-row-done{% endif %}">
+                            <tr class="{% if item.rozliv == 1 %}table-row-done{% endif %}"
+                                data-search="{{ (item.aroma_name ~ ' ' ~ item.buyer_name)|lower }}"
+                                data-status="{{ 'done' if item.rozliv == 1 else 'todo' }}">
                                 <td>{{ item.aroma_name }}</td>
                                 <td>{{ item.volume_ml }}</td>
                                 <td>{{ item.buyer_name }}</td>
@@ -167,6 +180,17 @@
                     </div>
                 </div>
 
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="otpravka">
+                    <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
+                           placeholder="🔍 Фамилия или аромат…">
+                    <div class="btn-group btn-group-sm tab-filters" role="group">
+                        <button type="button" class="btn btn-outline-secondary active" data-filter="all">Все</button>
+                        <button type="button" class="btn btn-outline-success" data-filter="done">Упакованные</button>
+                        <button type="button" class="btn btn-outline-secondary" data-filter="todo">Не упакованные</button>
+                    </div>
+                    <span class="text-muted small tab-count ms-auto"></span>
+                </div>
+
                 <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                     <table class="table table-hover">
                         <thead>
@@ -182,7 +206,9 @@
                             {% set current_buyer = namespace(name='') %}
                             {% for item in all_otpravka %}
                             <tr class="{% if item.upakovka == 1 %}table-row-done{% endif %}
-                                       {% if current_buyer.name != item.buyer_name and current_buyer.name != '' %}border-top border-2{% endif %}">
+                                       {% if current_buyer.name != item.buyer_name and current_buyer.name != '' %}border-top border-2{% endif %}"
+                                data-search="{{ (item.buyer_name ~ ' ' ~ item.aroma_name)|lower }}"
+                                data-status="{{ 'done' if item.upakovka == 1 else 'todo' }}">
                                 <td>{{ item.buyer_name }}</td>
                                 <td>{{ item.aroma_name }}</td>
                                 <td>{{ item.volume_ml }}</td>
@@ -241,6 +267,19 @@
 
         <div class="card shadow-sm">
             <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="oplata">
+                    <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
+                           placeholder="🔍 Фамилия…">
+                    <div class="btn-group btn-group-sm tab-filters" role="group">
+                        <button type="button" class="btn btn-outline-secondary active" data-filter="all">Все</button>
+                        <button type="button" class="btn btn-outline-warning" data-filter="unpaid">Не оплачена</button>
+                        <button type="button" class="btn btn-outline-success" data-filter="paid">Оплачена</button>
+                        <button type="button" class="btn btn-outline-info" data-filter="shipped">Отправлено</button>
+                        <button type="button" class="btn btn-outline-secondary" data-filter="unshipped">Не отправлено</button>
+                    </div>
+                    <span class="text-muted small tab-count ms-auto"></span>
+                </div>
+
                 <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                     <table class="table table-hover">
                         <thead>
@@ -257,7 +296,9 @@
                         </thead>
                         <tbody>
                             {% for buyer_name, data in buyers_summary %}
-                            <tr>
+                            <tr data-search="{{ buyer_name|lower }}"
+                                data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}"
+                                data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
                                 <td><strong>{{ buyer_name }}</strong></td>
                                 <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
                                 <td>
@@ -414,6 +455,53 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Первоначальное обновление баров
     refreshAllProgressBars();
+
+    initTabToolbars();
 });
+
+// === Поиск + фильтры по вкладкам (клиентские, без перезагрузки) ===
+function applyTab(scope) {
+    const tb = document.querySelector('.tab-toolbar[data-scope="' + scope + '"]');
+    if (!tb) return;
+    const q = (tb.querySelector('.tab-search').value || '').trim().toLowerCase();
+    const activeBtn = tb.querySelector('.tab-filters .active');
+    const filter = activeBtn ? activeBtn.dataset.filter : 'all';
+    const rows = document.querySelectorAll('#' + scope + ' tbody tr');
+    let shown = 0;
+    rows.forEach(function (r) {
+        const okText = !q || (r.dataset.search || '').indexOf(q) !== -1;
+        let okFilter = true;
+        if (filter !== 'all') {
+            if (scope === 'oplata') {
+                if (filter === 'paid') okFilter = r.dataset.paid === 'yes';
+                else if (filter === 'unpaid') okFilter = r.dataset.paid === 'no';
+                else if (filter === 'shipped') okFilter = r.dataset.shipped === 'yes';
+                else if (filter === 'unshipped') okFilter = r.dataset.shipped === 'no';
+            } else {
+                okFilter = (r.dataset.status === filter);
+            }
+        }
+        const vis = okText && okFilter;
+        r.style.display = vis ? '' : 'none';
+        if (vis) shown++;
+    });
+    const cnt = tb.querySelector('.tab-count');
+    if (cnt) cnt.textContent = 'показано ' + shown + ' из ' + rows.length;
+}
+
+function initTabToolbars() {
+    document.querySelectorAll('.tab-toolbar').forEach(function (tb) {
+        const scope = tb.dataset.scope;
+        tb.querySelector('.tab-search').addEventListener('input', function () { applyTab(scope); });
+        tb.querySelectorAll('.tab-filters button').forEach(function (b) {
+            b.addEventListener('click', function () {
+                tb.querySelectorAll('.tab-filters button').forEach(function (x) { x.classList.remove('active'); });
+                b.classList.add('active');
+                applyTab(scope);
+            });
+        });
+        applyTab(scope);
+    });
+}
 </script>
 {% endblock %}
