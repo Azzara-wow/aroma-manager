@@ -38,6 +38,8 @@ COL_PHONE, COL_NAME, COL_CODE, COL_ADDRESS, COL_ROLE, COL_CREATED, COL_NOTE = ra
 COL_LAST, COL_FIRST, COL_PATR, COL_CITY, COL_PVZ_ADDR, COL_PVZ_ID = range(7, 13)
 COL_TRACKING = 13  # N — ссылка отслеживания (пишет дашборд после подтверждения)
 COL_CARRIER = 14   # O — перевозчик выбранного ПВЗ: yandex | cdek (пишет витрина)
+COL_EMAIL = 15     # P — e-mail получателя (заполняет покупатель на витрине)
+COL_PAY_LINK = 16  # Q — ссылка на оплату (вносит организатор загрузкой Excel)
 
 
 def _key_path():
@@ -123,6 +125,8 @@ def _row_to_recipient(row, idx):
         # перевозчик — как выбрал покупатель в витрине (пусто, пока не выбрал);
         # для отправки пустое трактуем как Яндекс уже на этапе диспетчеризации
         "carrier": _cell(row, COL_CARRIER).lower(),
+        "email": _cell(row, COL_EMAIL),
+        "pay_link": _cell(row, COL_PAY_LINK),
         # готов к доставке: валидный телефон + имя (или фамилия) + выбран ПВЗ
         "delivery_ready": bool(valid_phone(phone) and (first or last) and pvz_id),
     }
@@ -218,6 +222,35 @@ def set_tracking(phone_raw, url):
         return {"ok": False, "reason": "not_found"}
     ws.update_acell(f"{_col_a1(COL_TRACKING)}{idx + 1}", url or "")
     return {"ok": True}
+
+
+def set_pay_links_bulk(links_by_phone):
+    """Массово записать ссылки на оплату в колонку Q по телефонам (из загруженного
+    Excel поставщика). {phone: link}. Возвращает {ok, updated, not_found:[...]}.
+
+    Пишем всю колонку Q за ОДИН запрос (существующие значения сохраняем, где не
+    пришла новая ссылка). Лист расширяем до Q, если её ещё нет."""
+    links = {normalize_phone(k): (v or "").strip() for k, v in (links_by_phone or {}).items()}
+    ws = _ws()
+    need = COL_PAY_LINK + 1
+    if ws.col_count < need:
+        ws.add_cols(need - ws.col_count)
+    values = ws.get_all_values()
+    n = len(values)
+    present = set()
+    col = [["ссылка на оплату"]]  # шапка Q1
+    for r in range(1, n):
+        ph = normalize_phone(_cell(values[r], COL_PHONE))
+        cur = _cell(values[r], COL_PAY_LINK)
+        if ph in links and links[ph]:
+            col.append([links[ph]])
+            present.add(ph)
+        else:
+            col.append([cur])
+    rng = f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_LINK)}{n}"
+    ws.update(range_name=rng, values=col)
+    not_found = [p for p, v in links.items() if v and p not in present]
+    return {"ok": True, "updated": len(present), "not_found": not_found}
 
 
 # ======================================================================

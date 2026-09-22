@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -194,7 +194,7 @@ async def create_zakupka(
 
 # === Страница закупки с тремя вкладками ===
 @app.get("/zakupka/{zakupka_id}", response_class=HTMLResponse)
-async def view_zakupka(request: Request, zakupka_id: int):
+async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
     db = get_db()
 
     zakupka = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
@@ -352,9 +352,125 @@ async def view_zakupka(request: Request, zakupka_id: int):
             "paid_zakupka": paid_zakupka,
             "shipped_count": shipped_count,
             "payment_zakupka_percent": payment_zakupka_percent,
-            "shipped_percent": shipped_percent
+            "shipped_percent": shipped_percent,
+            "paymsg": paymsg,
         }
     )
+
+
+@app.get("/zakupka/{zakupka_id}/pay-export")
+def pay_export(zakupka_id: int):
+    """Excel для поставщика (генерация ссылок на оплату): Телефон / Имя Фамилия /
+    E-mail + пустая колонка «Ссылка на оплату». Только покупатели с суммой закупки."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    db = get_db()
+    zak = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not zak:
+        db.close()
+        raise HTTPException(status_code=404, detail="Закупка не найдена")
+    sums = db.execute(
+        "SELECT buyer_name, SUM(total_sum) AS s FROM zakaz_items "
+        "WHERE zakupka_id = ? GROUP BY buyer_name HAVING s > 0 ORDER BY buyer_name",
+        (zakupka_id,),
+    ).fetchall()
+    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
+                     for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
+    db.close()
+    try:
+        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+    except Exception:
+        recips = {}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Оплата"
+    headers = ["Телефон", "Имя Фамилия", "E-mail", "Сумма закупки", "Ссылка на оплату"]
+    ws.append(headers)
+    head_fill = PatternFill("solid", fgColor="D9E1F2")
+    thin = Side(style="thin", color="BBBBBB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = head_fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+
+    for row in sums:
+        buyer = row["buyer_name"]
+        phone = phone_by_name.get(buyer, "") or buyers_sheet.phone_from_name(buyer)
+        rec = recips.get(phone) if phone else None
+        fio = ""
+        if rec:
+            fio = (rec.get("first_name", "") + " " + rec.get("last_name", "")).strip()
+        fio = fio or buyer
+        email = rec.get("email", "") if rec else ""
+        ws.append([phone, fio, email, round(row["s"] or 0), ""])
+        for c in ws[ws.max_row]:
+            c.border = border
+
+    for i, w in enumerate([16, 26, 26, 14, 40], start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="oplata_{zakupka_id}.xlsx"'},
+    )
+
+
+@app.post("/zakupka/{zakupka_id}/pay-import")
+def pay_import(zakupka_id: int, file: UploadFile = File(...)):
+    """Загрузка Excel от поставщика: разложить ссылки на оплату по телефонам (кол. Q)."""
+    import io
+    from urllib.parse import quote
+    from openpyxl import load_workbook
+
+    def _back(msg):
+        return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}", status_code=303)
+
+    try:
+        data = file.file.read()
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+    except Exception as e:
+        return _back(f"Не удалось прочитать файл: {e}")
+    if not rows:
+        return _back("Файл пустой.")
+
+    # ищем колонки «телефон» и «ссылка» по шапке
+    header = [str(c or "").strip().lower() for c in rows[0]]
+    col_phone = next((i for i, h in enumerate(header) if "телефон" in h or "phone" in h), None)
+    col_link = next((i for i, h in enumerate(header) if "ссылк" in h or "оплат" in h or "link" in h), None)
+    if col_phone is None or col_link is None:
+        return _back("В файле нет колонок «Телефон» и «Ссылка на оплату».")
+
+    links = {}
+    for r in rows[1:]:
+        if col_phone >= len(r) or col_link >= len(r):
+            continue
+        ph = buyers_sheet.normalize_phone(r[col_phone])
+        link = str(r[col_link] or "").strip()
+        if buyers_sheet.valid_phone(ph) and link:
+            links[ph] = link
+    if not links:
+        return _back("В файле не найдено ни одной ссылки с телефоном.")
+    try:
+        res = buyers_sheet.set_pay_links_bulk(links)
+    except Exception as e:
+        return _back(f"Ошибка записи в лист: {e}")
+    msg = f"Внесено ссылок: {res.get('updated', 0)}."
+    nf = res.get("not_found") or []
+    if nf:
+        msg += f" Не нашлись в листе: {len(nf)} (тел.: {', '.join(nf[:5])}{'…' if len(nf) > 5 else ''})."
+    return _back(msg)
 
 
 # === API для обновления статусов ===
