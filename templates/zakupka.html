@@ -74,6 +74,37 @@
 #otpravka tbody tr > td{
     transition:background-color .18s ease;
 }
+
+/* ===== Мобильные карточки (телефон) ===== */
+.m-wrap{ display:flex; flex-direction:column; gap:8px; }
+.m-toolbar{ margin-bottom:4px; }
+.m-search{ margin-bottom:8px; }
+.m-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.m-chip{ border:1px solid #d0d5dd; background:#fff; border-radius:999px;
+         padding:4px 14px; font-size:.85rem; color:#475467; }
+.m-chip.active{ background:#5b8c5a; border-color:#5b8c5a; color:#fff; }
+.m-count{ margin-top:8px; }
+.m-group{ border:1px solid #e6e8ec; border-radius:14px; overflow:hidden; background:#fff; }
+.m-group.g-done{ background:#f2f9f3; border-color:#cfe6d2; }
+.m-head{ display:flex; align-items:center; gap:9px; width:100%; border:0;
+         background:transparent; padding:13px 14px; text-align:left; }
+.m-dot{ width:10px; height:10px; border-radius:50%; flex:0 0 auto; background:#cbd5e1; }
+.m-group.g-done .m-dot{ background:#34a853; }
+.m-group.g-part .m-dot{ background:#f5a623; }
+.m-title{ font-weight:600; flex:1 1 auto; word-break:break-word; }
+.m-meta{ color:#98a2b3; font-size:.78rem; flex:0 0 auto; white-space:nowrap; }
+.m-badge{ font-size:.78rem; color:#3f6f43; background:#eef3ee; border-radius:999px;
+          padding:1px 9px; flex:0 0 auto; }
+.m-chev{ color:#98a2b3; transition:transform .15s; flex:0 0 auto; }
+.m-group.open .m-chev{ transform:rotate(180deg); }
+.m-body{ padding:2px 14px 14px; border-top:1px solid #f0f1f3; }
+.m-row{ display:flex; align-items:center; gap:10px; padding:9px 6px;
+        border-bottom:1px solid #f4f5f7; margin:0; cursor:pointer; }
+.m-row:last-of-type{ border-bottom:0; }
+.m-row-name{ flex:1 1 auto; word-break:break-word; }
+.m-row-vol{ color:#98a2b3; font-size:.85rem; flex:0 0 auto; }
+.m-row .m-check{ width:22px; height:22px; flex:0 0 auto; }
+.m-row-done{ background:#f2f9f3; border-radius:9px; }
 </style>
 
 <div class="mb-3">
@@ -122,6 +153,8 @@
                     </div>
                 </div>
 
+                <!-- ДЕСКТОП: таблица (как было) -->
+                <div class="d-none d-md-block">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="rozliv">
                     <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
                            placeholder="🔍 Фамилия или аромат…">
@@ -161,6 +194,48 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                </div>
+                </div>
+
+                <!-- ТЕЛЕФОН: карточки по номенклатуре, тап раскрывает заказавших -->
+                <div class="d-md-none m-wrap" data-scope="rozliv">
+                    <div class="m-toolbar">
+                        <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Аромат или фамилия…">
+                        <div class="m-chips">
+                            <button type="button" class="m-chip active" data-filter="all">Все</button>
+                            <button type="button" class="m-chip" data-filter="done">Разлитые</button>
+                            <button type="button" class="m-chip" data-filter="partial">Частично</button>
+                            <button type="button" class="m-chip" data-filter="todo">Не разлитые</button>
+                        </div>
+                        <div class="m-count small text-muted"></div>
+                    </div>
+                    {% for aroma, group in rozliv_items|groupby('aroma_name') %}
+                    {% set gitems = group|list %}
+                    {% set gdone = gitems|selectattr('rozliv','equalto',1)|list|length %}
+                    <div class="m-group" data-done="{{ gdone }}" data-total="{{ gitems|length }}"
+                         data-search="{{ aroma|lower }} {{ gitems|map(attribute='buyer_name')|join(' ')|lower }}">
+                        <button type="button" class="m-head">
+                            <span class="m-dot"></span>
+                            <span class="m-title">{{ aroma }}</span>
+                            <span class="m-meta">{{ gitems|sum(attribute='volume_ml') }} мл · {{ gitems|length }} шт</span>
+                            <span class="m-badge">{{ gdone }}/{{ gitems|length }}</span>
+                            <span class="m-chev">▾</span>
+                        </button>
+                        <div class="m-body" hidden>
+                            {% for it in gitems %}
+                            <label class="m-row {% if it.rozliv == 1 %}m-row-done{% endif %}">
+                                <span class="m-row-name">{{ it.buyer_name }}</span>
+                                <span class="m-row-vol">{{ it.volume_ml }} мл</span>
+                                <input type="checkbox" class="m-check" data-kind="rozliv"
+                                       data-item-id="{{ it.id }}" {% if it.rozliv == 1 %}checked{% endif %}>
+                            </label>
+                            {% endfor %}
+                            <button type="button" class="btn btn-sm btn-outline-success m-markall w-100 mt-2" data-kind="rozliv">
+                                Отметить всё разлитым
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
         </div>
@@ -457,7 +532,102 @@ document.addEventListener('DOMContentLoaded', function() {
     refreshAllProgressBars();
 
     initTabToolbars();
+    initMobile();
 });
+
+// === Мобильные карточки: раскрытие, статусы, роллап, поиск/фильтры ===
+function mGroupState(g) {
+    const done = +g.dataset.done, total = +g.dataset.total;
+    g.classList.remove('g-done', 'g-part');
+    if (total > 0 && done >= total) g.classList.add('g-done');
+    else if (done > 0) g.classList.add('g-part');
+    const badge = g.querySelector('.m-badge');
+    if (badge) badge.textContent = done + '/' + total;
+}
+function mRecount(g) {
+    const checks = g.querySelectorAll('.m-check');
+    g.dataset.done = [].filter.call(checks, function (c) { return c.checked; }).length;
+    g.dataset.total = checks.length;
+    mGroupState(g);
+}
+function mApply(wrap) {
+    const q = (wrap.querySelector('.m-search').value || '').trim().toLowerCase();
+    const active = wrap.querySelector('.m-chip.active');
+    const filter = active ? active.dataset.filter : 'all';
+    const groups = wrap.querySelectorAll('.m-group');
+    let shown = 0;
+    groups.forEach(function (g) {
+        const done = +g.dataset.done, total = +g.dataset.total;
+        let okF = true;
+        if (filter === 'done') okF = (total > 0 && done >= total);
+        else if (filter === 'todo') okF = (done === 0);
+        else if (filter === 'partial') okF = (done > 0 && done < total);
+        const okT = !q || (g.dataset.search || '').indexOf(q) !== -1;
+        const vis = okF && okT;
+        g.style.display = vis ? '' : 'none';
+        if (vis) shown++;
+    });
+    const cnt = wrap.querySelector('.m-count');
+    if (cnt) cnt.textContent = 'показано ' + shown + ' из ' + groups.length;
+}
+async function mToggle(cb) {
+    const kind = cb.dataset.kind, id = cb.dataset.itemId;
+    let url = null;
+    if (kind === 'rozliv') url = '/api/status/rozliv/' + id;
+    else if (kind === 'upakovka') url = '/api/status/upakovka/' + id + '?source=' + (cb.dataset.source || 'zakupka');
+    if (!url) return;
+    const want = cb.checked;
+    cb.disabled = true;
+    try {
+        const r = await fetch(url, { method: 'POST' });
+        const d = await r.json();
+        if (!d.ok) { cb.checked = !want; alert('Ошибка сохранения'); return; }
+        const row = cb.closest('.m-row');
+        if (row) row.classList.toggle('m-row-done', cb.checked);
+        // синхронизируем десктоп-двойника и общий прогресс
+        const twinSel = kind === 'rozliv' ? '.rozliv-checkbox' : '.upakovka-checkbox';
+        const twin = document.querySelector(twinSel + '[data-item-id="' + id + '"]');
+        if (twin) { twin.checked = cb.checked; const tr = twin.closest('tr'); if (tr) tr.classList.toggle('table-row-done', cb.checked); }
+        mRecount(cb.closest('.m-group'));
+        const wrap = cb.closest('.m-wrap'); if (wrap) mApply(wrap);
+        refreshAllProgressBars();
+    } catch (e) { cb.checked = !want; alert('Сетевая ошибка'); }
+    finally { cb.disabled = false; }
+}
+async function mMarkAll(btn) {
+    const g = btn.closest('.m-group');
+    const todo = [].filter.call(g.querySelectorAll('.m-check'), function (c) { return !c.checked; });
+    btn.disabled = true;
+    for (const c of todo) { c.checked = true; await mToggle(c); }
+    btn.disabled = false;
+}
+function initMobile() {
+    document.querySelectorAll('.m-wrap').forEach(function (wrap) {
+        wrap.querySelectorAll('.m-group').forEach(mGroupState);
+        wrap.querySelectorAll('.m-head').forEach(function (h) {
+            h.addEventListener('click', function () {
+                const g = h.closest('.m-group'), b = g.querySelector('.m-body');
+                if (b.hasAttribute('hidden')) { b.removeAttribute('hidden'); g.classList.add('open'); }
+                else { b.setAttribute('hidden', ''); g.classList.remove('open'); }
+            });
+        });
+        wrap.querySelectorAll('.m-check').forEach(function (cb) {
+            cb.addEventListener('change', function () { mToggle(cb); });
+        });
+        wrap.querySelectorAll('.m-markall').forEach(function (btn) {
+            btn.addEventListener('click', function () { mMarkAll(btn); });
+        });
+        wrap.querySelector('.m-search').addEventListener('input', function () { mApply(wrap); });
+        wrap.querySelectorAll('.m-chip').forEach(function (ch) {
+            ch.addEventListener('click', function () {
+                wrap.querySelectorAll('.m-chip').forEach(function (x) { x.classList.remove('active'); });
+                ch.classList.add('active');
+                mApply(wrap);
+            });
+        });
+        mApply(wrap);
+    });
+}
 
 // === Поиск + фильтры по вкладкам (клиентские, без перезагрузки) ===
 function applyTab(scope) {
