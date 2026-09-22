@@ -3,6 +3,7 @@
 
 Все настраиваемые числа — в блоке РЕДАКТИРУЕМЫЕ ТАБЛИЦЫ ниже. Правь их здесь.
 """
+import math
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -10,8 +11,13 @@ from .models import Dimensions, Place, Item
 
 # ================= РЕДАКТИРУЕМЫЕ ТАБЛИЦЫ =================
 
-# Вес ПУСТОГО флакона по объёму, граммы.
-FLACON_EMPTY_WEIGHTS_G = {5: 18, 10: 24, 30: 35, 50: 35, 100: 54}
+# Вес ПУСТОГО флакона по РАЗМЕРУ ТАРЫ, граммы (реальные данные поставщика).
+# Тары всего две: 10 мл и 50 мл. Правило разлива (см. _flacons_for_volume):
+#   объём ≤ 10 мл  → тара 10 мл;
+#   объём > 10 мл  → тара 50 мл (для >50 мл — несколько тар 50 мл).
+# Даже если 20 мл физически разлито как 10+10, считаем одной тарой 50 мл —
+# по весу разница копеечная (так решила Елена).
+FLACON_WEIGHTS_G = {10: 26, 50: 59}
 
 # Плотность парфюма, г/мл. Содержимое считаем как объём × плотность (сейчас 1 к 1).
 PERFUME_DENSITY = 1.0
@@ -65,13 +71,19 @@ class ParcelCalc:
     items: List[Item]
 
 
+def _flacons_for_volume(volume_ml: int):
+    """В какую тару разливаем заказанный объём → [(размер_тары_мл, штук)].
+    ≤10 мл → одна тара 10 мл; >10 мл → тара 50 мл (для >50 мл — несколько 50 мл)."""
+    if volume_ml <= 10:
+        return [(10, 1)]
+    return [(50, max(1, math.ceil(volume_ml / 50)))]
+
+
 def flacon_gross_weight_g(volume_ml: int) -> int:
-    """Брутто-вес одного флакона: пустой флакон + содержимое (объём × плотность)."""
-    empty = FLACON_EMPTY_WEIGHTS_G.get(volume_ml)
-    if empty is None:
-        # неизвестный объём — берём вес пустого флакона ближайшего известного
-        nearest = min(FLACON_EMPTY_WEIGHTS_G, key=lambda v: abs(v - volume_ml))
-        empty = FLACON_EMPTY_WEIGHTS_G[nearest]
+    """Брутто-вес одной позиции: пустая тара (по правилу разлива) + содержимое.
+    Содержимое = фактический заказанный объём × плотность (1:1), независимо от
+    числа тар (20 мл = 20 г масла, хоть в одном флаконе, хоть в двух)."""
+    empty = sum(FLACON_WEIGHTS_G[size] * n for size, n in _flacons_for_volume(volume_ml))
     return round(empty + volume_ml * PERFUME_DENSITY)
 
 
