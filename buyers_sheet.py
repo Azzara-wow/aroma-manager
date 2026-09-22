@@ -40,6 +40,7 @@ COL_TRACKING = 13  # N — ссылка отслеживания (пишет д�
 COL_CARRIER = 14   # O — перевозчик выбранного ПВЗ: yandex | cdek (пишет витрина)
 COL_EMAIL = 15     # P — e-mail получателя (заполняет покупатель на витрине)
 COL_PAY_LINK = 16  # Q — ссылка на оплату (вносит организатор загрузкой Excel)
+COL_PAY_AMOUNT = 17  # R — сумма к оплате (пишет дашборд вместе со ссылками)
 
 
 def _key_path():
@@ -224,31 +225,35 @@ def set_tracking(phone_raw, url):
     return {"ok": True}
 
 
-def set_pay_links_bulk(links_by_phone):
-    """Массово записать ссылки на оплату в колонку Q по телефонам (из загруженного
-    Excel поставщика). {phone: link}. Возвращает {ok, updated, not_found:[...]}.
+def set_pay_links_bulk(links_by_phone, amounts_by_phone=None):
+    """Массово записать ссылки на оплату (кол. Q) и суммы к оплате (кол. R) по
+    телефонам. {phone: link} и {phone: amount}. Возвращает {ok, updated, not_found}.
 
-    Пишем всю колонку Q за ОДИН запрос (существующие значения сохраняем, где не
-    пришла новая ссылка). Лист расширяем до Q, если её ещё нет."""
+    Пишем колонки Q:R за ОДИН запрос (существующие значения сохраняем, где новых
+    нет). Лист расширяем до R, если её ещё нет."""
     links = {normalize_phone(k): (v or "").strip() for k, v in (links_by_phone or {}).items()}
+    amounts = {normalize_phone(k): v for k, v in (amounts_by_phone or {}).items()}
     ws = _ws()
-    need = COL_PAY_LINK + 1
+    need = COL_PAY_AMOUNT + 1
     if ws.col_count < need:
         ws.add_cols(need - ws.col_count)
     values = ws.get_all_values()
     n = len(values)
     present = set()
-    col = [["ссылка на оплату"]]  # шапка Q1
+    rows = [["ссылка на оплату", "сумма к оплате"]]  # шапки Q1:R1
     for r in range(1, n):
         ph = normalize_phone(_cell(values[r], COL_PHONE))
-        cur = _cell(values[r], COL_PAY_LINK)
+        link_cur = _cell(values[r], COL_PAY_LINK)
+        amt_cur = _cell(values[r], COL_PAY_AMOUNT)
         if ph in links and links[ph]:
-            col.append([links[ph]])
+            link_new = links[ph]
+            amt_new = amounts.get(ph, amt_cur)
             present.add(ph)
         else:
-            col.append([cur])
-    rng = f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_LINK)}{n}"
-    ws.update(range_name=rng, values=col)
+            link_new, amt_new = link_cur, amt_cur
+        rows.append([link_new, amt_new])
+    rng = f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_AMOUNT)}{n}"
+    ws.update(range_name=rng, values=rows)
     not_found = [p for p, v in links.items() if v and p not in present]
     return {"ok": True, "updated": len(present), "not_found": not_found}
 

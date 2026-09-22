@@ -462,8 +462,25 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
             links[ph] = link
     if not links:
         return _back("В файле не найдено ни одной ссылки с телефоном.")
+
+    # суммы к оплате берём из закупки (источник правды дашборда), а не из файла
+    db = get_db()
+    sums = db.execute(
+        "SELECT buyer_name, SUM(total_sum) AS s FROM zakaz_items WHERE zakupka_id = ? GROUP BY buyer_name",
+        (zakupka_id,),
+    ).fetchall()
+    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
+                     for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
+    db.close()
+    sums_by_phone = {}
+    for row in sums:
+        ph = phone_by_name.get(row["buyer_name"], "") or buyers_sheet.phone_from_name(row["buyer_name"])
+        if ph:
+            sums_by_phone[ph] = round(row["s"] or 0)
+    amounts = {ph: sums_by_phone[ph] for ph in links if ph in sums_by_phone}
+
     try:
-        res = buyers_sheet.set_pay_links_bulk(links)
+        res = buyers_sheet.set_pay_links_bulk(links, amounts)
     except Exception as e:
         return _back(f"Ошибка записи в лист: {e}")
     msg = f"Внесено ссылок: {res.get('updated', 0)}."
