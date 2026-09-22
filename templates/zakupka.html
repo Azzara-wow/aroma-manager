@@ -105,6 +105,22 @@
 .m-row-vol{ color:#98a2b3; font-size:.85rem; flex:0 0 auto; }
 .m-row .m-check{ width:22px; height:22px; flex:0 0 auto; }
 .m-row-done{ background:#f2f9f3; border-radius:9px; }
+
+/* Оплата — карточки по покупателю */
+.m-paywrap{ display:flex; flex-direction:column; gap:8px; }
+.m-pay{ border:1px solid #e6e8ec; border-radius:14px; background:#fff; padding:12px 14px; }
+.m-pay.g-done{ background:#f2f9f3; border-color:#cfe6d2; }
+.m-pay-top{ display:flex; align-items:center; gap:9px; }
+.m-pay .m-dot{ background:#cbd5e1; }
+.m-pay.g-done .m-dot{ background:#34a853; }
+.m-pay.g-part .m-dot{ background:#f5a623; }
+.m-pay .m-title{ font-weight:600; flex:1 1 auto; word-break:break-word; }
+.m-pay-sum{ color:#3f6f43; font-weight:600; white-space:nowrap; }
+.m-pay-rows{ margin-top:8px; display:flex; flex-direction:column; }
+.m-pay-row{ display:flex; align-items:center; gap:10px; padding:9px 4px;
+            border-top:1px solid #f4f5f7; margin:0; cursor:pointer; }
+.m-pay-row span{ flex:1 1 auto; }
+.m-pay-row .m-paycheck{ width:22px; height:22px; flex:0 0 auto; }
 </style>
 
 <div class="mb-3">
@@ -126,7 +142,7 @@
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link" id="otpravka-tab" data-bs-toggle="tab" data-bs-target="#otpravka" type="button" role="tab">
-            📦 Отправка
+            📦 Упаковка
         </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -255,6 +271,8 @@
                     </div>
                 </div>
 
+                <!-- ДЕСКТОП: таблица (как было) -->
+                <div class="d-none d-md-block">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="otpravka">
                     <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
                            placeholder="🔍 Фамилия или аромат…">
@@ -309,6 +327,53 @@
                         </tbody>
                     </table>
                 </div>
+                </div>
+
+                <!-- ТЕЛЕФОН: карточки по покупателю, тап раскрывает номенклатуру -->
+                <div class="d-md-none m-wrap" data-scope="otpravka">
+                    <div class="m-toolbar">
+                        <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Фамилия или аромат…">
+                        <div class="m-chips">
+                            <button type="button" class="m-chip active" data-filter="all">Все</button>
+                            <button type="button" class="m-chip" data-filter="done">Упакованные</button>
+                            <button type="button" class="m-chip" data-filter="partial">Частично</button>
+                            <button type="button" class="m-chip" data-filter="todo">Не упакованные</button>
+                        </div>
+                        <div class="m-count small text-muted"></div>
+                    </div>
+                    {% for buyer, group in all_otpravka|groupby('buyer_name') %}
+                    {% set gitems = group|list %}
+                    {% set gdone = gitems|selectattr('upakovka','equalto',1)|list|length %}
+                    <div class="m-group" data-done="{{ gdone }}" data-total="{{ gitems|length }}"
+                         data-search="{{ buyer|lower }} {{ gitems|map(attribute='aroma_name')|join(' ')|lower }}">
+                        <button type="button" class="m-head">
+                            <span class="m-dot"></span>
+                            <span class="m-title">{{ buyer }}</span>
+                            <span class="m-meta">{{ gitems|length }} поз.</span>
+                            <span class="m-badge">{{ gdone }}/{{ gitems|length }}</span>
+                            <span class="m-chev">▾</span>
+                        </button>
+                        <div class="m-body" hidden>
+                            {% for it in gitems %}
+                            <label class="m-row {% if it.upakovka == 1 %}m-row-done{% endif %}">
+                                <span class="m-row-name">{{ it.aroma_name }}
+                                    {% if it.source == 'закупка' %}<span class="source-badge source-zakupka">закупка</span>
+                                    {% else %}<span class="source-badge source-nalichie">наличие</span>{% endif %}
+                                </span>
+                                <span class="m-row-vol">{{ it.volume_ml }} мл</span>
+                                <input type="checkbox" class="m-check" data-kind="upakovka"
+                                       data-item-id="{{ it.id }}"
+                                       data-source="{% if it.source == 'закупка' %}zakupka{% else %}nalichie{% endif %}"
+                                       {% if it.upakovka == 1 %}checked{% endif %}>
+                            </label>
+                            {% endfor %}
+                            <button type="button" class="btn btn-sm btn-outline-success m-markall w-100 mt-2" data-kind="upakovka">
+                                Отметить всё упакованным
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
         </div>
     </div>
@@ -342,6 +407,8 @@
 
         <div class="card shadow-sm">
             <div class="card-body">
+                <!-- ДЕСКТОП: таблица (как было) -->
+                <div class="d-none d-md-block">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="oplata">
                     <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
                            placeholder="🔍 Фамилия…">
@@ -409,6 +476,54 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                </div>
+                </div>
+
+                <!-- ТЕЛЕФОН: карточки по покупателю (суммы + статусы) -->
+                <div class="d-md-none m-paywrap">
+                    <div class="m-toolbar">
+                        <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Фамилия…">
+                        <div class="m-chips">
+                            <button type="button" class="m-chip active" data-filter="all">Все</button>
+                            <button type="button" class="m-chip" data-filter="unpaid">Не оплачена</button>
+                            <button type="button" class="m-chip" data-filter="paid">Оплачена</button>
+                            <button type="button" class="m-chip" data-filter="shipped">Отправлено</button>
+                            <button type="button" class="m-chip" data-filter="unshipped">Не отправлено</button>
+                        </div>
+                        <div class="m-count small text-muted"></div>
+                    </div>
+                    {% for buyer_name, data in buyers_summary %}
+                    <div class="m-pay" data-search="{{ buyer_name|lower }}"
+                         data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}"
+                         data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
+                        <div class="m-pay-top">
+                            <span class="m-dot"></span>
+                            <span class="m-title">{{ buyer_name }}</span>
+                            <span class="m-pay-sum">{{ "%.0f"|format((data.sum_zakupka or 0) + (data.sum_nalichie or 0)) }} ₽</span>
+                        </div>
+                        <div class="m-pay-rows">
+                            {% if data.sum_zakupka and data.sum_zakupka > 0 %}
+                            <label class="m-pay-row">
+                                <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
+                                <input type="checkbox" class="m-paycheck" data-paykind="payment-zakupka"
+                                       data-buyer="{{ buyer_name }}" {% if data.payment_zakupka == 1 %}checked{% endif %}>
+                            </label>
+                            {% endif %}
+                            {% if data.sum_nalichie and data.sum_nalichie > 0 %}
+                            <label class="m-pay-row">
+                                <span>Наличие · {{ "%.0f"|format(data.sum_nalichie) }} ₽</span>
+                                <input type="checkbox" class="m-paycheck" data-paykind="payment-nalichie"
+                                       data-buyer="{{ buyer_name }}" {% if data.payment_nalichie == 1 %}checked{% endif %}>
+                            </label>
+                            {% endif %}
+                            <label class="m-pay-row">
+                                <span>Отправлено</span>
+                                <input type="checkbox" class="m-paycheck" data-paykind="shipped"
+                                       data-buyer="{{ buyer_name }}" {% if data.shipped == 1 %}checked{% endif %}>
+                            </label>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
         </div>
@@ -533,6 +648,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     initTabToolbars();
     initMobile();
+    initPayMobile();
 });
 
 // === Мобильные карточки: раскрытие, статусы, роллап, поиск/фильтры ===
@@ -585,8 +701,11 @@ async function mToggle(cb) {
         const row = cb.closest('.m-row');
         if (row) row.classList.toggle('m-row-done', cb.checked);
         // синхронизируем десктоп-двойника и общий прогресс
-        const twinSel = kind === 'rozliv' ? '.rozliv-checkbox' : '.upakovka-checkbox';
-        const twin = document.querySelector(twinSel + '[data-item-id="' + id + '"]');
+        let twin;
+        if (kind === 'upakovka')
+            twin = document.querySelector('.upakovka-checkbox[data-item-id="' + id + '"][data-source="' + (cb.dataset.source || 'zakupka') + '"]');
+        else
+            twin = document.querySelector('.rozliv-checkbox[data-item-id="' + id + '"]');
         if (twin) { twin.checked = cb.checked; const tr = twin.closest('tr'); if (tr) tr.classList.toggle('table-row-done', cb.checked); }
         mRecount(cb.closest('.m-group'));
         const wrap = cb.closest('.m-wrap'); if (wrap) mApply(wrap);
@@ -626,6 +745,76 @@ function initMobile() {
             });
         });
         mApply(wrap);
+    });
+}
+
+// === Мобильная «Оплата»: карточки по покупателю (без раскрытия) ===
+function mPayState(card) {
+    const checks = card.querySelectorAll('.m-paycheck');
+    const total = checks.length;
+    const done = [].filter.call(checks, function (c) { return c.checked; }).length;
+    card.classList.remove('g-done', 'g-part');
+    if (total > 0 && done >= total) card.classList.add('g-done');
+    else if (done > 0) card.classList.add('g-part');
+}
+function mPayApply(wrap) {
+    const q = (wrap.querySelector('.m-search').value || '').trim().toLowerCase();
+    const active = wrap.querySelector('.m-chip.active');
+    const filter = active ? active.dataset.filter : 'all';
+    const cards = wrap.querySelectorAll('.m-pay');
+    let shown = 0;
+    cards.forEach(function (c) {
+        let okF = true;
+        if (filter === 'paid') okF = c.dataset.paid === 'yes';
+        else if (filter === 'unpaid') okF = c.dataset.paid === 'no';
+        else if (filter === 'shipped') okF = c.dataset.shipped === 'yes';
+        else if (filter === 'unshipped') okF = c.dataset.shipped === 'no';
+        const okT = !q || (c.dataset.search || '').indexOf(q) !== -1;
+        const vis = okF && okT;
+        c.style.display = vis ? '' : 'none';
+        if (vis) shown++;
+    });
+    const cnt = wrap.querySelector('.m-count');
+    if (cnt) cnt.textContent = 'показано ' + shown + ' из ' + cards.length;
+}
+async function mPayToggle(cb) {
+    const kind = cb.dataset.paykind, buyer = cb.dataset.buyer; // payment-zakupka | payment-nalichie | shipped
+    const url = '/api/status/' + kind + '/' + encodeURIComponent(buyer);
+    const fd = new FormData(); fd.append('zakupka_id', '{{ zakupka.id }}');
+    const want = cb.checked;
+    cb.disabled = true;
+    try {
+        const r = await fetch(url, { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!d.ok) { cb.checked = !want; alert('Ошибка сохранения'); return; }
+        // синхронизируем десктоп-двойника (по имени покупателя, без экранирования)
+        const twin = [].find.call(document.querySelectorAll('.' + kind + '-checkbox'),
+            function (x) { return x.dataset.buyer === buyer; });
+        if (twin) twin.checked = cb.checked;
+        const card = cb.closest('.m-pay');
+        if (kind === 'payment-zakupka') card.dataset.paid = cb.checked ? 'yes' : 'no';
+        if (kind === 'shipped') card.dataset.shipped = cb.checked ? 'yes' : 'no';
+        mPayState(card);
+        const wrap = cb.closest('.m-paywrap'); if (wrap) mPayApply(wrap);
+        refreshAllProgressBars();
+    } catch (e) { cb.checked = !want; alert('Сетевая ошибка'); }
+    finally { cb.disabled = false; }
+}
+function initPayMobile() {
+    document.querySelectorAll('.m-paywrap').forEach(function (wrap) {
+        wrap.querySelectorAll('.m-pay').forEach(mPayState);
+        wrap.querySelectorAll('.m-paycheck').forEach(function (cb) {
+            cb.addEventListener('change', function () { mPayToggle(cb); });
+        });
+        wrap.querySelector('.m-search').addEventListener('input', function () { mPayApply(wrap); });
+        wrap.querySelectorAll('.m-chip').forEach(function (ch) {
+            ch.addEventListener('click', function () {
+                wrap.querySelectorAll('.m-chip').forEach(function (x) { x.classList.remove('active'); });
+                ch.classList.add('active');
+                mPayApply(wrap);
+            });
+        });
+        mPayApply(wrap);
     });
 }
 
