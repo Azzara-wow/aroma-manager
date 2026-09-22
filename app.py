@@ -900,6 +900,79 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     })
 
 
+@app.get("/dostavka/zakupka/{zakupka_id}/export")
+def dostavka_export(zakupka_id: int):
+    """Выгрузка таблицы посылок в Excel для разливщика: состав, вес, коробка
+    (+ пустые «ОК?» и «Заменить на» для его пометок)."""
+    import io
+    from yandex_delivery import parcel
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    db = get_db()
+    zak = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not zak:
+        db.close()
+        raise HTTPException(status_code=404, detail="Закупка не найдена")
+    items = db.execute(
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum "
+        "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name", (zakupka_id,),
+    ).fetchall()
+    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
+                     for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
+
+    by_buyer = {}
+    for it in items:
+        by_buyer.setdefault(it["buyer_name"], []).append(it)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Доставка"
+    headers = ["№", "Покупатель", "Состав заказа", "Позиций", "Вес, г",
+               "Коробка (поставщик)", "Ориентир Яндекса", "ОК?", "Заменить на"]
+    ws.append(headers)
+
+    head_fill = PatternFill("solid", fgColor="D9E1F2")
+    thin = Side(style="thin", color="BBBBBB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = head_fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+
+    n = 0
+    for buyer_name, its in by_buyer.items():
+        n += 1
+        phone = phone_by_name.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
+        lines = [parcel.ParcelLine(it["aroma_name"], it["volume_ml"], 1,
+                                   int(round((it["total_sum"] or 0) * 100))) for it in its]
+        box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{phone}", "")) if phone else None
+        calc = parcel.calc(lines, barcode=f"X{zakupka_id}-{n}", box=box)
+        contents = "; ".join(f"{it['aroma_name']} ×{it['volume_ml']}мл" for it in its)
+        ws.append([n, buyer_name, contents, len(its), calc.weight_g, calc.box.name,
+                   calc.yandex_ref.code if calc.yandex_ref else "", "", ""])
+        for c in ws[ws.max_row]:
+            c.border = border
+            c.alignment = Alignment(vertical="top", wrap_text=(c.column == 3))
+    db.close()
+
+    widths = [4, 26, 42, 8, 8, 20, 16, 6, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"dostavka_{zakupka_id}.xlsx"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @app.post("/dostavka/zakupka/{zakupka_id}/box")
 def dostavka_set_box(zakupka_id: int, phone: str = Form(...), box: str = Form(...)):
     """Ручная смена коробки поставщика для получателя. Пусто → сброс на авто-подбор."""

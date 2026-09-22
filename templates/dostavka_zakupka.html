@@ -59,8 +59,13 @@
       <i class="bi bi-upc-scan"></i> ③ Ярлыки {{ 'Яндекс' if cr == 'yandex' else 'СДЭК' }}
     </a>
     {% endfor %}
+    <a class="btn btn-outline-success" formnovalidate
+       href="/dostavka/zakupka/{{ zakupka.id }}/export" onclick="event.stopPropagation()">
+      <i class="bi bi-file-earmark-excel"></i> Выгрузить в Excel
+    </a>
     <span class="text-muted small">
       Отметь получателей → «Создать» → «Подтвердить» (бронь) → «Ярлыки».
+      Excel — для разливщика (состав, вес, коробка).
     </span>
   </div>
 </div>
