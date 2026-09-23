@@ -490,6 +490,96 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
     return _back(msg)
 
 
+def _xlsx_response(wb, filename):
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _xlsx_header(ws, headers, widths):
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    ws.append(headers)
+    fill = PatternFill("solid", fgColor="D9E1F2")
+    thin = Side(style="thin", color="BBBBBB")
+    ws._thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = ws._thin_border
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    ws.freeze_panes = "A2"
+
+
+@app.get("/zakupka/{zakupka_id}/rozliv-export")
+def rozliv_export(zakupka_id: int):
+    """Реестр розлива для разливщика: Наименование → Общее количество (мл) + Позиций."""
+    from openpyxl import Workbook
+    db = get_db()
+    zak = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not zak:
+        db.close()
+        raise HTTPException(status_code=404, detail="Закупка не найдена")
+    rows = db.execute(
+        "SELECT aroma_name, SUM(volume_ml) AS total, COUNT(*) AS cnt "
+        "FROM zakaz_items WHERE zakupka_id = ? GROUP BY aroma_name ORDER BY aroma_name",
+        (zakupka_id,),
+    ).fetchall()
+    db.close()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Реестр розлива"
+    _xlsx_header(ws, ["Наименование", "Общее количество, мл", "Позиций"], [36, 22, 10])
+    for r in rows:
+        ws.append([r["aroma_name"], r["total"] or 0, r["cnt"]])
+        for c in ws[ws.max_row]:
+            c.border = ws._thin_border
+    return _xlsx_response(wb, f"reestr_rozliv_{zakupka_id}.xlsx")
+
+
+@app.get("/zakupka/{zakupka_id}/upakovka-export")
+def upakovka_export(zakupka_id: int):
+    """Накладная для упаковки: Покупатель → список товаров и количество (закупка+наличие)."""
+    from openpyxl import Workbook
+    db = get_db()
+    zak = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not zak:
+        db.close()
+        raise HTTPException(status_code=404, detail="Закупка не найдена")
+    zk = db.execute(
+        "SELECT buyer_name, aroma_name, volume_ml FROM zakaz_items WHERE zakupka_id = ?",
+        (zakupka_id,),
+    ).fetchall()
+    nl = db.execute(
+        "SELECT buyer_name, aroma_name, volume_ml FROM nalichie_orders "
+        "WHERE zakupka_id = ? OR zakupka_id IS NULL", (zakupka_id,),
+    ).fetchall()
+    db.close()
+    items = [{"buyer": r["buyer_name"], "aroma": r["aroma_name"], "vol": r["volume_ml"], "src": "закупка"} for r in zk]
+    items += [{"buyer": r["buyer_name"], "aroma": r["aroma_name"], "vol": r["volume_ml"], "src": "наличие"} for r in nl]
+    items.sort(key=lambda x: (x["buyer"], 0 if x["src"] == "закупка" else 1, x["aroma"]))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Накладная"
+    _xlsx_header(ws, ["Покупатель", "Товар", "Кол-во", "Источник"], [28, 32, 10, 12])
+    prev = None
+    for it in items:
+        buyer = it["buyer"] if it["buyer"] != prev else ""   # имя покупателя — один раз на группу
+        ws.append([buyer, it["aroma"], it["vol"], it["src"]])
+        for c in ws[ws.max_row]:
+            c.border = ws._thin_border
+        prev = it["buyer"]
+    return _xlsx_response(wb, f"nakladnaya_{zakupka_id}.xlsx")
+
+
 # === API для обновления статусов ===
 @app.post("/api/status/rozliv/{item_id}")
 async def toggle_rozliv(item_id: int):

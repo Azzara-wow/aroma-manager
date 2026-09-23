@@ -169,8 +169,14 @@
                     </div>
                 </div>
 
-                <!-- ДЕСКТОП: таблица (как было) -->
-                <div class="d-none d-md-block">
+                <div class="mb-3">
+                    <a class="btn btn-outline-success btn-sm" href="/zakupka/{{ zakupka.id }}/rozliv-export">
+                        <i class="bi bi-file-earmark-excel"></i> Реестр в Excel (Наименование · Общее кол-во)
+                    </a>
+                </div>
+
+                <!-- ДЕСКТОП-таблица: скрыта, но нужна для синхронизации галочек и прогресса -->
+                <div class="d-none">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="rozliv">
                     <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
                            placeholder="🔍 Фамилия или аромат…">
@@ -213,8 +219,8 @@
                 </div>
                 </div>
 
-                <!-- ТЕЛЕФОН: карточки по номенклатуре, тап раскрывает заказавших -->
-                <div class="d-md-none m-wrap" data-scope="rozliv">
+                <!-- Карточки по номенклатуре (все экраны): тап раскрывает заказавших -->
+                <div class="m-wrap" data-scope="rozliv">
                     <div class="m-toolbar">
                         <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Аромат или фамилия…">
                         <div class="m-chips">
@@ -269,6 +275,12 @@
                          aria-valuemin="0" aria-valuemax="100">
                         {{ otpravka_done }} / {{ otpravka_total }} упаковано ({{ otpravka_percent }}%)
                     </div>
+                </div>
+
+                <div class="mb-3">
+                    <a class="btn btn-outline-success btn-sm" href="/zakupka/{{ zakupka.id }}/upakovka-export">
+                        <i class="bi bi-file-earmark-excel"></i> Накладная в Excel (Покупатель · товары)
+                    </a>
                 </div>
 
                 <!-- ДЕСКТОП: таблица (как было) -->
