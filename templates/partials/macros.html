@@ -1,0 +1,9 @@
+{#- «79022034755 - Оксана» → крупно «Оксана», телефон мелко серым. Иначе имя как есть. -#}
+{% macro who(name) -%}
+{%- set parts = (name or '').split(' - ', 1) -%}
+{%- if parts|length == 2 and parts[0]|length >= 10 and parts[0].isdigit() -%}
+<span class="who-name">{{ parts[1] }}</span> <span class="who-phone">{{ parts[0] }}</span>
+{%- else -%}
+<span class="who-name">{{ name }}</span>
+{%- endif -%}
+{%- endmacro %}

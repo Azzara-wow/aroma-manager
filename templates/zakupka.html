@@ -3,6 +3,7 @@
 {% block title %}{{ zakupka.name }} — Менеджер закупок Luzi{% endblock %}
 
 {% block content %}
+{% from 'partials/macros.html' import who %}
 
 <style>
 @media (max-width:768px){
@@ -60,6 +61,33 @@
         text-align:center;
     }
 
+}
+
+/* ---------- Имя: крупно, телефон мелко серым ---------- */
+.who-phone{ color:#9aa3ad; font-size:.78em; font-weight:400; white-space:nowrap; }
+
+/* ---------- Полоски прогресса: подпись видна и при нуле ---------- */
+.progress{ height:1.35rem; }
+.progress-bar{ overflow:visible; white-space:nowrap; justify-content:flex-start;
+               padding-left:8px; color:#1f2937; font-weight:600; }
+
+/* ---------- Состав на телефоне: строка таблицы = карточка ---------- */
+@media (max-width:767.98px){
+    #sostav-table thead{ display:none; }
+    #sostav-table, #sostav-table tbody{ display:block; }
+    #sostav-table tr{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px 8px;
+        border:1px solid #e6e8ec; border-radius:12px; padding:10px; margin-bottom:8px; background:#fff; }
+    #sostav-table tr.table-warning{ background:#fff8e1; }
+    #sostav-table tr.table-danger{ background:#fdecec; }
+    #sostav-table td{ display:block; border:0; padding:0; background:transparent !important; }
+    #sostav-table td:nth-child(1), #sostav-table td:nth-child(2){ grid-column:1 / -1; }
+    #sostav-table td:nth-child(6){ grid-column:1 / -1; text-align:right; }
+    #sostav-table td input{ max-width:none !important; width:100%; }
+    #sostav-table td:nth-child(3)::before{ content:"мл"; }
+    #sostav-table td:nth-child(4)::before{ content:"цена за мл"; }
+    #sostav-table td:nth-child(5)::before{ content:"сумма"; }
+    #sostav-table td:nth-child(n+3):nth-child(-n+5)::before{ display:block; font-size:11px; color:#8a939c; margin-bottom:2px; }
+    #sostav .table-responsive{ overflow-x:visible; }
 }
 
 /* ---------- Подсветка выполненных строк (розлив/упаковка) ---------- */
@@ -157,28 +185,7 @@
 </div>
 
 <!-- Табы -->
-<ul class="nav nav-tabs mb-3" id="zakupkaTabs" role="tablist">
-    <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="rozliv-tab" data-bs-toggle="tab" data-bs-target="#rozliv" type="button" role="tab">
-            🧪 Розлив
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="otpravka-tab" data-bs-toggle="tab" data-bs-target="#otpravka" type="button" role="tab">
-            📦 Упаковка
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="oplata-tab" data-bs-toggle="tab" data-bs-target="#oplata" type="button" role="tab">
-            💰 Оплата
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="sostav-tab" data-bs-toggle="tab" data-bs-target="#sostav" type="button" role="tab">
-            ✏️ Состав
-        </button>
-    </li>
-</ul>
+{% with current='' %}{% include 'partials/zakupka_tabs.html' %}{% endwith %}
 
 <!-- Содержимое вкладок -->
 <div class="tab-content" id="zakupkaTabsContent">
@@ -274,7 +281,7 @@
                         <div class="m-body" hidden>
                             {% for it in gitems %}
                             <label class="m-row {% if it.rozliv == 1 %}m-row-done{% endif %}">
-                                <span class="m-row-name">{{ it.buyer_name }}</span>
+                                <span class="m-row-name">{{ who(it.buyer_name) }}</span>
                                 <span class="m-row-vol">{{ it.volume_ml }} мл</span>
                                 <input type="checkbox" class="m-check" data-kind="rozliv"
                                        data-item-id="{{ it.id }}" {% if it.rozliv == 1 %}checked{% endif %}>
@@ -311,8 +318,8 @@
                     </a>
                 </div>
 
-                <!-- ДЕСКТОП: таблица (как было) -->
-                <div class="d-none d-md-block">
+                <!-- ДЕСКТОП-таблица: скрыта, но нужна для синхронизации галочек и прогресса -->
+                <div class="d-none">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="otpravka">
                     <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
                            placeholder="🔍 Фамилия или аромат…">
@@ -369,8 +376,8 @@
                 </div>
                 </div>
 
-                <!-- ТЕЛЕФОН: карточки по покупателю, тап раскрывает номенклатуру -->
-                <div class="d-md-none m-wrap" data-scope="otpravka">
+                <!-- Карточки по покупателю (все экраны): тап раскрывает номенклатуру -->
+                <div class="m-wrap" data-scope="otpravka">
                     <div class="m-toolbar">
                         <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Фамилия или аромат…">
                         <div class="m-chips">
@@ -388,7 +395,7 @@
                          data-search="{{ buyer|lower }} {{ gitems|map(attribute='aroma_name')|join(' ')|lower }}">
                         <button type="button" class="m-head">
                             <span class="m-dot"></span>
-                            <span class="m-title">{{ buyer }}</span>
+                            <span class="m-title">{{ who(buyer) }}</span>
                             <span class="m-meta">{{ gitems|length }} поз.</span>
                             <span class="m-badge">{{ gdone }}/{{ gitems|length }}</span>
                             <span class="m-chev">▾</span>
@@ -436,13 +443,14 @@
                 <i class="bi bi-arrow-up-circle"></i> Обновить суммы в витрине
               </button>
             </form>
-            <div class="text-muted small w-100">
+            <details class="text-muted small w-100">
+              <summary>Как это работает</summary>
               Выгрузи → в файле сверху те, кто платит <b>по ссылке</b>, ниже — <b>на карту</b> (строку можно перенести вниз руками).
               Поставщик впишет ссылки → загрузи обратно: девочки увидят в витрине закупку, доставку и итог.
               Галочка «Оплата закупки» — только за реальную оплату: она сразу показывает в витрине «Оплачено ✓».
               Доставку можно вписать руками (пусто — цена Яндекса), у «на карту» — куда переводить.
               Правки сумм и реквизитов уходят девочкам кнопкой «Обновить суммы в витрине».
-            </div>
+            </details>
           </div>
         </div>
         <div class="card shadow-sm mb-3">
@@ -499,8 +507,6 @@
                                 <th>Оплата закупки</th>
                                 <th>Сумма наличия</th>
                                 <th>Оплата наличия</th>
-                                <th>Телефон</th>
-                                <th>Адрес</th>
                                 <th>Отправлено</th>
                             </tr>
                         </thead>
@@ -509,7 +515,7 @@
                             <tr data-search="{{ buyer_name|lower }}"
                                 data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}"
                                 data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
-                                <td><strong>{{ buyer_name }}</strong></td>
+                                <td><strong>{{ who(buyer_name) }}</strong></td>
                                 <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
                                 <td>
                                     {% if data.sum_zakupka > 0 %}
@@ -553,8 +559,6 @@
                                     —
                                     {% endif %}
                                 </td>
-                                <td>{{ data.phone }}</td>
-                                <td><small>{{ data.address }}</small></td>
                                 <td>
                                     <input type="checkbox"
                                            class="status-checkbox shipped-checkbox"
@@ -587,7 +591,7 @@
                          data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
                         <div class="m-pay-top">
                             <span class="m-dot"></span>
-                            <span class="m-title">{{ buyer_name }}</span>
+                            <span class="m-title">{{ who(buyer_name) }}</span>
                             <span class="m-pay-sum">{{ "%.0f"|format((data.sum_zakupka or 0) + (data.sum_nalichie or 0)) }} ₽</span>
                         </div>
                         <div class="m-pay-rows">
@@ -640,11 +644,17 @@
     <div class="tab-pane fade" id="sostav" role="tabpanel">
         <div class="card shadow-sm">
             <div class="card-body">
-                <div class="alert alert-light border small mb-3">
+                <details class="alert alert-light border small mb-3">
+                    <summary>Как это работает · статусы не меняются</summary>
                     Правь состав закупки прямо здесь — объём, аромат, покупателя. Сумма считается
                     автоматически (объём × цена за 1 мл, у Базы — штуки × цена за штуку), но её можно поправить руками.
                     Изменения сразу в базе — гуглшит и перезагрузка не нужны.
                     <b>Статусы (разлито/упаковано/оплата) не меняются.</b>
+                </details>
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                    <input type="search" class="form-control form-control-sm" id="sostav-search"
+                           style="max-width:280px" placeholder="🔍 Фамилия или аромат…">
+                    <span class="text-muted small ms-auto" id="sostav-count"></span>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle" id="sostav-table">
@@ -1017,10 +1027,11 @@ function initTabToolbars() {
 }
 
 // после выгрузки/загрузки счетов возвращаемся сразу на вкладку «Оплата»
-if (location.hash === '#oplata' || {{ 'true' if paymsg else 'false' }}) {
-    const t = document.getElementById('oplata-tab');
+(function () {
+    const key = ({{ 'true' if paymsg else 'false' }}) ? 'oplata' : (location.hash || '').slice(1);
+    const t = key && document.getElementById(key + '-tab');
     if (t) bootstrap.Tab.getOrCreateInstance(t).show();
-}
+})();
 
 // === Способ оплаты: по ссылке / на карту (разметка, не факт оплаты) ===
 document.addEventListener('click', async function (e) {
@@ -1209,6 +1220,24 @@ document.addEventListener('change', async function (e) {
             }
         } catch (e) { flash('Сбой сети', false); }
     }
+
+    // поиск по фамилии/аромату (значения берём из полей — они могли измениться)
+    const search = document.getElementById('sostav-search');
+    const countEl = document.getElementById('sostav-count');
+    function applySearch() {
+        const q = (search && search.value || '').trim().toLowerCase();
+        let shown = 0, all = 0;
+        tbody.querySelectorAll('tr').forEach(function (tr) {
+            all++;
+            const text = (tr.querySelector('.s-buyer').value + ' ' + tr.querySelector('.s-aroma').value).toLowerCase();
+            const ok = !q || text.indexOf(q) !== -1 || tr.classList.contains('table-warning');
+            tr.hidden = !ok;
+            if (ok) shown++;
+        });
+        if (countEl) countEl.textContent = 'показано ' + shown + ' из ' + all;
+    }
+    if (search) search.addEventListener('input', applySearch);
+    applySearch();
 
     // делегирование: работает и для добавленных строк
     tbody.addEventListener('input', function (e) {

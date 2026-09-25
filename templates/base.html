@@ -18,12 +18,12 @@
 </button>
 <div class="collapse navbar-collapse" id="navbarNav">
 <ul class="navbar-nav ms-auto">
-<li class="nav-item"><a class="nav-link" href="/"><i class="bi bi-speedometer2"></i> Дашборд</a></li>
-<li class="nav-item"><a class="nav-link" href="/zakupka/new"><i class="bi bi-plus-circle"></i> Новая закупка</a></li>
-<li class="nav-item"><a class="nav-link" href="/nalichie/new"><i class="bi bi-box"></i> + Наличие</a></li>
-<li class="nav-item"><a class="nav-link" href="/nalichie"><i class="bi bi-list-ul"></i> Заказы наличия</a></li>
-<li class="nav-item"><a class="nav-link" href="/buyers"><i class="bi bi-people"></i> Покупатели</a></li>
-<li class="nav-item"><a class="nav-link" href="/dostavka"><i class="bi bi-truck"></i> Доставки</a></li>
+{# 4 раздела; действия («Новая закупка», «+ Заказ с наличия») — кнопками внутри разделов #}
+{% set _p = request.url.path if request is defined else '' %}
+<li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p == '/' or _p.startswith('/zakupka') or _p.startswith('/dostavka/zakupka') }}" href="/"><i class="bi bi-box-seam"></i> Закупки</a></li>
+<li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/nalichie') }}" href="/nalichie"><i class="bi bi-box"></i> Наличие</a></li>
+<li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/buyers') }}" href="/buyers"><i class="bi bi-people"></i> Покупатели</a></li>
+<li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/dostavka') and not _p.startswith('/dostavka/zakupka') }}" href="/dostavka"><i class="bi bi-truck"></i> Доставки</a></li>
 </ul>
 </div>
 </nav>

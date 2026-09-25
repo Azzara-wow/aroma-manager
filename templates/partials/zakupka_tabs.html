@@ -1,0 +1,40 @@
+{#- Ряд вкладок закупки. На странице закупки вкладки переключаются на месте (bootstrap),
+    «Доставка» — отдельная страница /dostavka/zakupka/{id}, но выглядит как вкладка.
+    Параметры: zakupka, current ('dostavka' на странице доставок, иначе пусто). -#}
+{% set on_dost = (current == 'dostavka') %}
+{% set tabs = [('rozliv', '🧪 Розлив'), ('otpravka', '📦 Упаковка'), ('dostavka', '🚚 Доставка'),
+               ('oplata', '💰 Оплата'), ('sostav', '✏️ Состав')] %}
+<ul class="nav nav-tabs mb-3 zk-tabs" id="zakupkaTabs" role="tablist">
+    {% for key, label in tabs %}
+    <li class="nav-item" role="presentation">
+        {% if key == 'dostavka' %}
+            <a class="nav-link {{ 'active' if on_dost }}" href="/dostavka/zakupka/{{ zakupka.id }}">{{ label }}</a>
+        {% elif on_dost %}
+            <a class="nav-link" href="/zakupka/{{ zakupka.id }}#{{ key }}">{{ label }}</a>
+        {% else %}
+            <button class="nav-link {{ 'active' if key == 'rozliv' }}" id="{{ key }}-tab" data-bs-toggle="tab"
+                    data-bs-target="#{{ key }}" type="button" role="tab">{{ label }}</button>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+<style>
+/* 5 вкладок: на телефоне не переносим, а листаем вбок */
+.zk-tabs{ flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.zk-tabs::-webkit-scrollbar{ display:none; }
+.zk-tabs .nav-link{ white-space:nowrap; }
+</style>
+<script>
+// активную вкладку держим в видимой части ряда (на телефоне ряд листается вбок)
+document.addEventListener('DOMContentLoaded', function () {
+    const bar = document.getElementById('zakupkaTabs');
+    if (!bar) return;
+    function reveal(el) {
+        if (!el) return;
+        const x = el.getBoundingClientRect().left - bar.getBoundingClientRect().left + bar.scrollLeft;
+        bar.scrollTo({ left: x - (bar.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+    }
+    bar.addEventListener('shown.bs.tab', function (e) { reveal(e.target); });
+    setTimeout(function () { reveal(bar.querySelector('.nav-link.active')); }, 50);
+});
+</script>

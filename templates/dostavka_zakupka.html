@@ -3,17 +3,19 @@
 {% block title %}Доставки по закупке — {{ zakupka.name }}{% endblock %}
 
 {% block content %}
-<div class="row mb-3">
-  <div class="col">
-    <h2><i class="bi bi-truck"></i> Доставки — {{ zakupka.name }}</h2>
-    <div class="text-muted small">
-      Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
-      Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
-    </div>
-  </div>
-  <div class="col text-end">
-    <a href="/dostavka" class="btn btn-outline-secondary btn-sm">← Все доставки</a>
-  </div>
+{% from 'partials/macros.html' import who %}
+<style>.who-phone{ color:#9aa3ad; font-size:.78em; font-weight:400; white-space:nowrap; }</style>
+<div class="mb-3">
+    <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Назад</a>
+    <h2 class="d-inline ms-3">{{ zakupka.name }}</h2>
+    {% if zakupka.status == 'active' %}<span class="badge bg-success ms-2">Активна</span>
+    {% else %}<span class="badge bg-secondary ms-2">Архив</span>{% endif %}
+</div>
+{% with current='dostavka' %}{% include 'partials/zakupka_tabs.html' %}{% endwith %}
+<div class="text-muted small mb-3">
+  Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
+  Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
+  <a href="/dostavka" class="ms-2">Все получатели и ПВЗ отправления →</a>
 </div>
 
 {% if sheet_error %}
@@ -85,7 +87,6 @@
             <th>Покупатель</th>
             <th>ТК</th>
             <th>ФИО получателя</th>
-            <th>Телефон</th>
             <th>ПВЗ назначения</th>
             <th>Поз.</th>
             <th>Вес, г</th>
@@ -100,7 +101,7 @@
               <input type="checkbox" class="form-check-input" name="phones" value="{{ r.phone }}"
                      {{ 'checked' if r.ready else 'disabled' }}>
             </td>
-            <td><strong>{{ r.buyer_name }}</strong></td>
+            <td><strong>{{ who(r.buyer_name) }}</strong>{% if not r.phone %}<div class="small text-danger">нет телефона</div>{% endif %}</td>
             <td>
               {% if r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
               {% elif r.carrier == 'yandex' %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>
@@ -108,7 +109,6 @@
               {% endif %}
             </td>
             <td>{{ r.fio or '—' }}</td>
-            <td>{{ r.phone or '—' }}</td>
             <td><small>{{ r.pvz_address or '—' }}</small></td>
             <td>{{ r.positions }}</td>
             <td>{{ r.weight_g }}</td>
