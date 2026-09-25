@@ -46,6 +46,17 @@ COL_PAID = 19        # T — «оплачено», когда организат
 PAY_HEADERS = ["ссылка на оплату", "сумма к оплате", "доставка", "оплата"]  # Q1:T1
 PAID_MARK = "оплачено"
 
+# Перевозчики с автоматической отправкой. Любое другое значение в колонке O
+# («Почта России», «Озон»…) вписывает организатор: ручная доставка по договорённости,
+# адрес — свободным текстом в колонке L, через API такие посылки НЕ отправляем.
+SELF_CARRIERS = ("yandex", "cdek")
+
+
+def manual_carrier(raw):
+    """Название ручного перевозчика или '' (Яндекс/СДЭК/пусто)."""
+    v = (raw or "").strip()
+    return "" if v.lower() in ("",) + SELF_CARRIERS else v
+
 
 def _key_path():
     for p in KEY_PATHS:
@@ -116,6 +127,7 @@ def _row_to_recipient(row, idx):
     fio = " ".join(p for p in (last, first, patr) if p)
     phone = normalize_phone(_cell(row, COL_PHONE))
     pvz_id = _cell(row, COL_PVZ_ID)
+    manual = manual_carrier(_cell(row, COL_CARRIER))
     return {
         "row": idx,                      # 0-индекс в values (для точечной правки)
         "phone": phone,
@@ -129,11 +141,13 @@ def _row_to_recipient(row, idx):
         "pvz_id": pvz_id,
         # перевозчик — как выбрал покупатель в витрине (пусто, пока не выбрал);
         # для отправки пустое трактуем как Яндекс уже на этапе диспетчеризации
-        "carrier": _cell(row, COL_CARRIER).lower(),
+        "carrier": "manual" if manual else _cell(row, COL_CARRIER).lower(),
+        "carrier_manual": manual,        # «Почта России» и т.п. — отправка руками
         "email": _cell(row, COL_EMAIL),
         "pay_link": _cell(row, COL_PAY_LINK),
         # готов к доставке: валидный телефон + имя (или фамилия) + выбран ПВЗ
-        "delivery_ready": bool(valid_phone(phone) and (first or last) and pvz_id),
+        # (ручная доставка к автоматической отправке не готова никогда)
+        "delivery_ready": bool(valid_phone(phone) and (first or last) and pvz_id and not manual),
     }
 
 

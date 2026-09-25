@@ -1241,6 +1241,8 @@ def _delivery_block_reason(phone, rec):
         return "нет привязки телефона (страница «Покупатели»)"
     if rec is None:
         return "телефон не найден в листе «Покупатели»"
+    if rec.get("carrier_manual"):
+        return f"вручную: {rec['carrier_manual']}"
     if not (rec.get("first_name") or rec.get("last_name")):
         return "не заполнено ФИО получателя"
     if not rec.get("pvz_id"):
@@ -1309,6 +1311,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "fio": rec["fio"] if rec else "",
             "pvz_address": rec["pvz_address"] if rec else "",
             "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
+            "carrier_manual": (rec.get("carrier_manual") if rec else ""),
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,                         # выбранная коробка поставщика
@@ -1370,11 +1373,23 @@ def dostavka_export(zakupka_id: int):
     by_buyer = {}
     for it in items:
         by_buyer.setdefault(it["buyer_name"], []).append(it)
+    try:
+        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+    except Exception:
+        recips = {}
+
+    def _how(rec):
+        """Как едет посылка: Яндекс/СДЭК или ручная доставка с ФИО и адресом."""
+        if not rec:
+            return ""
+        if rec.get("carrier_manual"):
+            return f"✋ {rec['carrier_manual']}: {rec.get('fio', '')}, {rec.get('pvz_address', '')}".strip(", ")
+        return {"cdek": "СДЭК", "yandex": "Яндекс"}.get(rec.get("carrier"), "")
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Доставка"
-    headers = ["№", "Покупатель", "Состав заказа", "Позиций", "Вес, г",
+    headers = ["№", "Покупатель", "Доставка", "Состав заказа", "Позиций", "Вес, г",
                "Коробка (поставщик)", "Ориентир Яндекса", "ОК?", "Заменить на"]
     ws.append(headers)
 
@@ -1396,14 +1411,14 @@ def dostavka_export(zakupka_id: int):
         box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{phone}", "")) if phone else None
         calc = parcel.calc(lines, barcode=f"X{zakupka_id}-{n}", box=box)
         contents = "; ".join(f"{it['aroma_name']} ×{it['volume_ml']}мл" for it in its)
-        ws.append([n, buyer_name, contents, len(its), calc.weight_g, calc.box.name,
-                   calc.yandex_ref.code if calc.yandex_ref else "", "", ""])
+        ws.append([n, buyer_name, _how(recips.get(phone)), contents, len(its), calc.weight_g,
+                   calc.box.name, calc.yandex_ref.code if calc.yandex_ref else "", "", ""])
         for c in ws[ws.max_row]:
             c.border = border
-            c.alignment = Alignment(vertical="top", wrap_text=(c.column == 3))
+            c.alignment = Alignment(vertical="top", wrap_text=(c.column in (3, 4)))
     db.close()
 
-    widths = [4, 26, 42, 8, 8, 20, 16, 6, 16]
+    widths = [4, 26, 30, 42, 8, 8, 20, 16, 6, 16]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + i)].width = w
     ws.freeze_panes = "A2"
@@ -1488,8 +1503,8 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
     created, skipped, errors = 0, 0, []
     for ph in set(phones):
         rec = recips.get(ph)
-        if not rec or not rec.get("pvz_id") or not (rec.get("first_name") or rec.get("last_name")):
-            skipped += 1
+        if not rec or rec.get("carrier_manual") or not rec.get("pvz_id")                 or not (rec.get("first_name") or rec.get("last_name")):
+            skipped += 1   # ручная доставка (Почта России и т.п.) через API не идёт
             continue
         pair = lines_by_phone.get(ph)
         if not pair or not pair[0]:

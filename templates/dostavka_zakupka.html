@@ -104,6 +104,7 @@
             <td>
               {% if r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
               {% elif r.carrier == 'yandex' %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>
+              {% elif r.carrier_manual %}<span class="badge bg-info text-dark">✋ {{ r.carrier_manual }}</span>
               {% endif %}
             </td>
             <td>{{ r.fio or '—' }}</td>
