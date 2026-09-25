@@ -332,6 +332,13 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
     payment_zakupka_percent = int((paid_zakupka / total_buyers * 100)) if total_buyers > 0 else 0
     shipped_percent = int((shipped_count / total_buyers * 100)) if total_buyers > 0 else 0
 
+    # === СОСТАВ (редактируемые позиции закупки) ===
+    sostav_items = [row_to_dict(r) for r in db.execute(
+        "SELECT id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum "
+        "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name, aroma_name",
+        (zakupka_id,),
+    ).fetchall()]
+
     db.close()
 
     return templates.TemplateResponse(
@@ -339,6 +346,7 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
         {
             "request": request,
             "zakupka": zakupka_dict,
+            "sostav_items": sostav_items,
             "rozliv_items": rozliv_items,
             "rozliv_total": rozliv_total,
             "rozliv_done": rozliv_done,
@@ -750,6 +758,75 @@ async def reopen_zakupka(zakupka_id: int):
     db.commit()
     db.close()
     return RedirectResponse(url=f"/zakupka/{zakupka_id}", status_code=303)
+
+
+# === Редактирование состава закупки (позиции zakaz_items) прямо в дашборде ===
+@app.post("/zakupka/{zakupka_id}/item/add")
+def item_add(zakupka_id: int, buyer_name: str = Form(""), aroma_name: str = Form(""),
+             volume_ml: int = Form(0), price_per_10ml: float = Form(0), total_sum: float = Form(0)):
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO zakaz_items (zakupka_id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum) "
+        "VALUES (?,?,?,?,?,?)",
+        (zakupka_id, buyer_name.strip(), aroma_name.strip(),
+         int(volume_ml or 0), float(price_per_10ml or 0), float(total_sum or 0)),
+    )
+    iid = cur.lastrowid
+    db.execute("INSERT INTO statuses (zakaz_item_id, rozliv, upakovka, payment_zakupka, shipped) VALUES (?,0,0,0,0)", (iid,))
+    bn = buyer_name.strip()
+    if bn and not db.execute("SELECT id FROM buyers WHERE name = ?", (bn,)).fetchone():
+        db.execute("INSERT INTO buyers (name) VALUES (?)", (bn,))
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True, "id": iid})
+
+
+@app.post("/zakupka/{zakupka_id}/item/{item_id}/edit")
+def item_edit(zakupka_id: int, item_id: int, buyer_name: str = Form(""), aroma_name: str = Form(""),
+              volume_ml: int = Form(0), price_per_10ml: float = Form(0), total_sum: float = Form(0)):
+    db = get_db()
+    db.execute(
+        "UPDATE zakaz_items SET buyer_name=?, aroma_name=?, volume_ml=?, price_per_10ml=?, total_sum=? "
+        "WHERE id=? AND zakupka_id=?",
+        (buyer_name.strip(), aroma_name.strip(), int(volume_ml or 0),
+         float(price_per_10ml or 0), float(total_sum or 0), item_id, zakupka_id),
+    )
+    bn = buyer_name.strip()
+    if bn and not db.execute("SELECT id FROM buyers WHERE name = ?", (bn,)).fetchone():
+        db.execute("INSERT INTO buyers (name) VALUES (?)", (bn,))
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/zakupka/{zakupka_id}/item/{item_id}/delete")
+def item_delete(zakupka_id: int, item_id: int):
+    db = get_db()
+    db.execute("DELETE FROM statuses WHERE zakaz_item_id = ?", (item_id,))
+    db.execute("DELETE FROM zakaz_items WHERE id = ? AND zakupka_id = ?", (item_id, zakupka_id))
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/zakupka/{zakupka_id}/delete")
+async def delete_zakupka(zakupka_id: int):
+    """Полное удаление закупки со всем связанным. Только для архивных (closed)."""
+    db = get_db()
+    z = db.execute("SELECT status FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
+    if not z or z["status"] != "closed":
+        db.close()
+        return RedirectResponse(url="/", status_code=303)  # активные не удаляем — сперва в архив
+    db.execute("DELETE FROM statuses WHERE zakaz_item_id IN (SELECT id FROM zakaz_items WHERE zakupka_id=?)", (zakupka_id,))
+    db.execute("DELETE FROM statuses WHERE nalichie_order_id IN (SELECT id FROM nalichie_orders WHERE zakupka_id=?)", (zakupka_id,))
+    db.execute("DELETE FROM zakaz_items WHERE zakupka_id = ?", (zakupka_id,))
+    db.execute("DELETE FROM nalichie_orders WHERE zakupka_id = ?", (zakupka_id,))
+    db.execute("DELETE FROM deliveries WHERE zakupka_id = ?", (zakupka_id,))
+    db.execute("DELETE FROM settings WHERE key LIKE ?", (f"box:{zakupka_id}:%",))
+    db.execute("DELETE FROM zakupkas WHERE id = ?", (zakupka_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/", status_code=303)
 
 
 # === Покупатели ===

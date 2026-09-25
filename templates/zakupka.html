@@ -150,6 +150,11 @@
             💰 Оплата
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="sostav-tab" data-bs-toggle="tab" data-bs-target="#sostav" type="button" role="tab">
+            ✏️ Состав
+        </button>
+    </li>
 </ul>
 
 <!-- Содержимое вкладок -->
@@ -554,6 +559,51 @@
             </div>
         </div>
     </div>
+
+    <!-- Вкладка СОСТАВ: редактирование позиций прямо в базе (статусы не трогаем) -->
+    <div class="tab-pane fade" id="sostav" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="alert alert-light border small mb-3">
+                    Правь состав закупки прямо здесь — объём, аромат, покупателя. Сумма считается
+                    автоматически (объём ÷ 10 × цена за 10 мл), но её можно поправить руками.
+                    Изменения сразу в базе — гуглшит и перезагрузка не нужны.
+                    <b>Статусы (разлито/упаковано/оплата) не меняются.</b>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle" id="sostav-table">
+                        <thead><tr>
+                            <th style="min-width:150px">Покупатель</th>
+                            <th style="min-width:150px">Аромат</th>
+                            <th>Объём, мл</th>
+                            <th>Цена/10мл</th>
+                            <th>Сумма</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody>
+                        {% for it in sostav_items %}
+                        <tr data-id="{{ it.id }}">
+                            <td><input class="form-control form-control-sm s-buyer" value="{{ it.buyer_name }}"></td>
+                            <td><input class="form-control form-control-sm s-aroma" value="{{ it.aroma_name }}"></td>
+                            <td><input type="number" class="form-control form-control-sm s-vol" value="{{ it.volume_ml }}" style="max-width:88px"></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm s-price" value="{{ it.price_per_10ml }}" style="max-width:96px"></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm s-sum" value="{{ it.total_sum }}" style="max-width:104px"></td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-sm btn-success s-save" type="button" title="Сохранить">💾</button>
+                                <button class="btn btn-sm btn-outline-danger s-del" type="button" title="Удалить">✕</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <button class="btn btn-outline-primary btn-sm" type="button" id="sostav-add">
+                    <i class="bi bi-plus-lg"></i> Добавить позицию
+                </button>
+                <span class="small ms-2" id="sostav-msg"></span>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -888,5 +938,95 @@ function initTabToolbars() {
         applyTab(scope);
     });
 }
+
+// === Редактирование состава закупки (AJAX, статусы не трогаем) ===
+(function () {
+    const ZID = {{ zakupka.id }};
+    const table = document.getElementById('sostav-table');
+    if (!table) return;
+    const tbody = table.querySelector('tbody');
+    const msgEl = document.getElementById('sostav-msg');
+
+    function flash(text, ok) {
+        if (!msgEl) return;
+        msgEl.textContent = text;
+        msgEl.className = 'small ms-2 ' + (ok ? 'text-success' : 'text-danger');
+        setTimeout(function () { if (msgEl.textContent === text) msgEl.textContent = ''; }, 2500);
+    }
+    function autoSum(tr) {
+        const vol = parseFloat(tr.querySelector('.s-vol').value) || 0;
+        const price = parseFloat(tr.querySelector('.s-price').value) || 0;
+        tr.querySelector('.s-sum').value = Math.round(vol / 10 * price * 100) / 100;
+    }
+    function rowForm(tr) {
+        const fd = new FormData();
+        fd.append('buyer_name', tr.querySelector('.s-buyer').value.trim());
+        fd.append('aroma_name', tr.querySelector('.s-aroma').value.trim());
+        fd.append('volume_ml', tr.querySelector('.s-vol').value || 0);
+        fd.append('price_per_10ml', tr.querySelector('.s-price').value || 0);
+        fd.append('total_sum', tr.querySelector('.s-sum').value || 0);
+        return fd;
+    }
+    async function saveRow(tr) {
+        try {
+            const r = await fetch('/zakupka/' + ZID + '/item/' + tr.dataset.id + '/edit',
+                { method: 'POST', body: rowForm(tr) });
+            const j = await r.json();
+            if (j.ok) { tr.classList.remove('table-warning'); flash('Сохранено ✓', true); }
+            else flash('Ошибка сохранения', false);
+        } catch (e) { flash('Сбой сети', false); }
+    }
+    async function delRow(tr) {
+        if (!confirm('Удалить позицию «' + tr.querySelector('.s-buyer').value + ' · '
+            + tr.querySelector('.s-aroma').value + '»? Статусы этой позиции тоже уйдут.')) return;
+        try {
+            const r = await fetch('/zakupka/' + ZID + '/item/' + tr.dataset.id + '/delete', { method: 'POST' });
+            const j = await r.json();
+            if (j.ok) { tr.remove(); flash('Удалено', true); }
+            else flash('Не удалось удалить', false);
+        } catch (e) { flash('Сбой сети', false); }
+    }
+    function makeRow(id) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = id;
+        tr.innerHTML =
+            '<td><input class="form-control form-control-sm s-buyer"></td>' +
+            '<td><input class="form-control form-control-sm s-aroma"></td>' +
+            '<td><input type="number" class="form-control form-control-sm s-vol" style="max-width:88px"></td>' +
+            '<td><input type="number" step="0.01" class="form-control form-control-sm s-price" style="max-width:96px"></td>' +
+            '<td><input type="number" step="0.01" class="form-control form-control-sm s-sum" style="max-width:104px"></td>' +
+            '<td class="text-nowrap">' +
+            '<button class="btn btn-sm btn-success s-save" type="button" title="Сохранить">💾</button> ' +
+            '<button class="btn btn-sm btn-outline-danger s-del" type="button" title="Удалить">✕</button></td>';
+        return tr;
+    }
+    async function addRow() {
+        try {
+            const r = await fetch('/zakupka/' + ZID + '/item/add', { method: 'POST', body: new FormData() });
+            const j = await r.json();
+            if (j.ok) {
+                const tr = makeRow(j.id);
+                tbody.appendChild(tr);
+                tr.classList.add('table-warning');
+                tr.querySelector('.s-buyer').focus();
+                flash('Пустая позиция добавлена — заполни и сохрани', true);
+            }
+        } catch (e) { flash('Сбой сети', false); }
+    }
+
+    // делегирование: работает и для добавленных строк
+    tbody.addEventListener('input', function (e) {
+        const tr = e.target.closest('tr'); if (!tr) return;
+        if (e.target.classList.contains('s-vol') || e.target.classList.contains('s-price')) autoSum(tr);
+        tr.classList.add('table-warning');   // помечаем несохранённое
+    });
+    tbody.addEventListener('click', function (e) {
+        const tr = e.target.closest('tr'); if (!tr) return;
+        if (e.target.closest('.s-save')) saveRow(tr);
+        else if (e.target.closest('.s-del')) delRow(tr);
+    });
+    const addBtn = document.getElementById('sostav-add');
+    if (addBtn) addBtn.addEventListener('click', addRow);
+})();
 </script>
 {% endblock %}

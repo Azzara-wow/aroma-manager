@@ -69,6 +69,12 @@
                         </button>
                     </form>
                 </div>
+                <form method="POST" action="/zakupka/{{ zakupka.id }}/delete" class="mt-2"
+                      onsubmit="return confirm('Удалить архив «{{ zakupka.name }}» НАВСЕГДА?\n\nПозиции, статусы, наличие и доставки этой закупки будут удалены. Отменить нельзя.')">
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                        <i class="bi bi-trash"></i> Удалить архив
+                    </button>
+                </form>
             </div>
         </div>
     </div>
