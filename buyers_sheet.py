@@ -43,7 +43,8 @@ COL_PAY_LINK = 16  # Q — ссылка на оплату (вносит орга
 COL_PAY_AMOUNT = 17  # R — сумма к оплате = закупка + доставка (пишет дашборд)
 COL_PAY_DELIVERY = 18  # S — доставка в счёте, ₽ (Яндекс за наш счёт → строкой в счёт)
 COL_PAID = 19        # T — «оплачено», когда организатор отметил оплату в дашборде
-PAY_HEADERS = ["ссылка на оплату", "сумма к оплате", "доставка", "оплата"]  # Q1:T1
+COL_PAY_TO = 20      # U — куда переводить при оплате на карту («+79131967569 Яндекс»)
+PAY_HEADERS = ["ссылка на оплату", "сумма к оплате", "доставка", "оплата", "реквизиты"]  # Q1:U1
 PAID_MARK = "оплачено"
 
 # Перевозчики с автоматической отправкой. Любое другое значение в колонке O
@@ -244,18 +245,18 @@ def set_tracking(phone_raw, url):
 
 
 _PAY_FIELDS = {"link": COL_PAY_LINK, "amount": COL_PAY_AMOUNT,
-               "delivery": COL_PAY_DELIVERY, "paid": COL_PAID}
+               "delivery": COL_PAY_DELIVERY, "paid": COL_PAID, "payto": COL_PAY_TO}
 
 
 def set_pay_fields_bulk(updates, clear_others=False):
-    """Массово записать счёт в колонки Q:T одним запросом.
-    updates = {phone: {"link"?, "amount"?, "delivery"?, "paid"?}} — поле, которого нет
+    """Массово записать счёт в колонки Q:U одним запросом.
+    updates = {phone: {"link"?, "amount"?, "delivery"?, "paid"?, "payto"?}} — поле, которого нет
     в словаре телефона, остаётся как было. clear_others=True — у всех, кого нет в
     updates, Q:T очищаются (новая закупка, прошлые счета больше не актуальны).
     Возвращает {ok, updated, not_found}."""
     ups = {normalize_phone(k): v for k, v in (updates or {}).items()}
     ws = _ws()
-    need = COL_PAID + 1
+    need = COL_PAY_TO + 1
     if ws.col_count < need:
         ws.add_cols(need - ws.col_count)
     values = ws.get_all_values()
@@ -272,8 +273,8 @@ def set_pay_fields_bulk(updates, clear_others=False):
                     cur[f] = "" if v is None else str(v)
         elif clear_others:
             cur = {f: "" for f in cur}
-        out.append([cur["link"], cur["amount"], cur["delivery"], cur["paid"]])
-    rng = f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAID)}{n}"
+        out.append([cur["link"], cur["amount"], cur["delivery"], cur["paid"], cur["payto"]])
+    rng = f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_TO)}{n}"
     ws.update(range_name=rng, values=out)
     not_found = [p for p in ups if p not in present]
     return {"ok": True, "updated": len(present), "not_found": not_found}
@@ -284,9 +285,9 @@ def set_paid(phone_raw, paid):
     Пишем ОДНУ ячейку, чтобы быстрые клики по разным покупателям не затирали друг друга."""
     canon = normalize_phone(phone_raw)
     ws = _ws()
-    if ws.col_count < COL_PAID + 1:
-        ws.add_cols(COL_PAID + 1 - ws.col_count)
-        ws.update(range_name=f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAID)}1", values=[PAY_HEADERS])
+    if ws.col_count < COL_PAY_TO + 1:
+        ws.add_cols(COL_PAY_TO + 1 - ws.col_count)
+        ws.update(range_name=f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_TO)}1", values=[PAY_HEADERS])
     idx = _find_row(ws.get_all_values(), canon)
     if idx is None:
         return {"ok": False, "reason": "not_found"}

@@ -440,6 +440,8 @@
               Выгрузи → в файле сверху те, кто платит <b>по ссылке</b>, ниже — <b>на карту</b> (строку можно перенести вниз руками).
               Поставщик впишет ссылки → загрузи обратно: девочки увидят в витрине закупку, доставку и итог.
               Галочка «Оплата закупки» — только за реальную оплату: она сразу показывает в витрине «Оплачено ✓».
+              Доставку можно вписать руками (пусто — цена Яндекса), у «на карту» — куда переводить.
+              Правки сумм и реквизитов уходят девочкам кнопкой «Обновить суммы в витрине».
             </div>
           </div>
         </div>
@@ -509,14 +511,25 @@
                                 data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
                                 <td><strong>{{ buyer_name }}</strong></td>
                                 <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
-                                <td>{{ data.delivery if data.delivery else "—" }}</td>
-                                <td><strong>{{ data.bill_total if data.bill_total else "—" }}</strong></td>
                                 <td>
+                                    {% if data.sum_zakupka > 0 %}
+                                    <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
+                                           style="width:84px" data-buyer="{{ buyer_name }}"
+                                           value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
+                                           placeholder="{{ data.delivery_auto if data.delivery_auto else '—' }}"
+                                           title="Пусто — цена черновика Яндекса{% if data.delivery_auto %} ({{ data.delivery_auto }} ₽){% endif %}. Впиши сумму — будет она.">
+                                    {% else %}—{% endif %}
+                                </td>
+                                <td><strong class="bill-total" data-buyer="{{ buyer_name }}">{{ data.bill_total if data.bill_total else "—" }}</strong></td>
+                                <td style="min-width:180px">
                                     {% if data.sum_zakupka > 0 %}
                                     <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
                                             data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
                                         {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
                                     </button>
+                                    <input type="text" class="form-control form-control-sm bill-payto mt-1" data-buyer="{{ buyer_name }}"
+                                           value="{{ data.payto }}" placeholder="куда: +7913… Яндекс"
+                                           {% if data.method != 'card' %}hidden{% endif %}>
                                     {% endif %}
                                 </td>
                                 <td>
@@ -580,11 +593,23 @@
                         <div class="m-pay-rows">
                             {% if data.sum_zakupka and data.sum_zakupka > 0 %}
                             <div class="m-pay-row">
-                                <span>{% if data.delivery %}Доставка {{ data.delivery }} ₽ · итого <b>{{ data.bill_total }} ₽</b>{% else %}Способ оплаты{% endif %}</span>
+                                <span>Доставка, ₽</span>
+                                <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
+                                       style="width:90px" data-buyer="{{ buyer_name }}"
+                                       value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
+                                       placeholder="{{ data.delivery_auto if data.delivery_auto else '—' }}">
+                            </div>
+                            <div class="m-pay-row">
+                                <span>Итого <b class="bill-total" data-buyer="{{ buyer_name }}">{{ data.bill_total }}</b> ₽</span>
                                 <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
                                         data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
                                     {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
                                 </button>
+                            </div>
+                            <div class="m-pay-row">
+                                <input type="text" class="form-control form-control-sm bill-payto" data-buyer="{{ buyer_name }}"
+                                       value="{{ data.payto }}" placeholder="куда переводить: +7913… Яндекс"
+                                       {% if data.method != 'card' %}hidden{% endif %}>
                             </div>
                             <label class="m-pay-row">
                                 <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
@@ -1018,7 +1043,36 @@ document.addEventListener('click', async function (e) {
             b.classList.toggle('btn-outline-warning', j.method === 'card');
             b.classList.toggle('btn-outline-primary', j.method !== 'card');
         });
+        document.querySelectorAll('.bill-payto').forEach(function (i) {
+            if (i.dataset.buyer === buyer) i.hidden = (j.method !== 'card');
+        });
     } catch (err) { alert('Сбой сети — способ оплаты не сохранён'); }
+});
+
+// === Ручные поля счёта: доставка (₽) и реквизиты перевода — сохраняются при выходе из поля ===
+document.addEventListener('change', async function (e) {
+    const inp = e.target.closest('.bill-fee, .bill-payto');
+    if (!inp) return;
+    const buyer = inp.dataset.buyer;
+    const field = inp.classList.contains('bill-fee') ? 'delivery' : 'payto';
+    const fd = new FormData();
+    fd.append('buyer', buyer);
+    fd.append('field', field);
+    fd.append('value', inp.value);
+    try {
+        const j = await (await fetch('/api/billing/{{ zakupka.id }}', { method: 'POST', body: fd })).json();
+        if (!j.ok) { inp.classList.add('is-invalid'); alert(j.error || 'Не сохранилось'); return; }
+        inp.classList.remove('is-invalid');
+        const cls = field === 'delivery' ? '.bill-fee' : '.bill-payto';
+        document.querySelectorAll(cls).forEach(function (x) {        // двойник десктоп/телефон
+            if (x.dataset.buyer === buyer && x !== inp) x.value = inp.value;
+        });
+        document.querySelectorAll('.bill-total').forEach(function (t) {
+            if (t.dataset.buyer === buyer) t.textContent = j.total;
+        });
+        inp.classList.add('is-valid');
+        setTimeout(function () { inp.classList.remove('is-valid'); }, 1200);
+    } catch (err) { inp.classList.add('is-invalid'); alert('Сбой сети — не сохранилось'); }
 });
 
 // === Обновление из витрины: превью разницы → применить ===

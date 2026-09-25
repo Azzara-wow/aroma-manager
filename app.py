@@ -329,8 +329,11 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
     for buyer_name, data in buyers_summary.items():
         inv = inv_by_buyer.get(buyer_name)
         data["delivery"] = inv["delivery"] if inv else 0
+        data["delivery_auto"] = inv["delivery_auto"] if inv else 0
+        data["delivery_manual"] = inv["delivery_manual"] if inv else None
         data["bill_total"] = inv["total"] if inv else 0
         data["method"] = inv["method"] if inv else billing.METHOD_LINK
+        data["payto"] = inv["payto"] if inv else ""
 
     buyers_summary_sorted = sorted(buyers_summary.items(), key=lambda x: x[0])
 
@@ -421,8 +424,10 @@ def pay_export(zakupka_id: int):
             rec = recips.get(it["phone"]) if it["phone"] else None
             fio = (((rec.get("first_name", "") + " " + rec.get("last_name", "")).strip() if rec else "")
                    or it["buyer"].split(" - ", 1)[-1])
+            # у «на карту» в последней колонке — реквизиты (для сведения, ссылка не нужна)
             ws.append([it["phone"], fio, rec.get("email", "") if rec else "",
-                       it["goods"], it["delivery"] or "", it["total"], ""])
+                       it["goods"], it["delivery"] or "", it["total"],
+                       it["payto"] if it["method"] == billing.METHOD_CARD else ""])
             for cell in ws[ws.max_row]:
                 cell.border = ws._thin_border
 
@@ -461,7 +466,9 @@ def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
         if not it["phone"]:
             continue
         u = {"amount": it["total"], "delivery": it["delivery"] or "",
-             "paid": buyers_sheet.PAID_MARK if it["paid"] else ""}
+             "paid": buyers_sheet.PAID_MARK if it["paid"] else "",
+             # реквизиты перевода — только тем, кто платит на карту
+             "payto": it["payto"] if it["method"] == billing.METHOD_CARD else ""}
         if it["phone"] in links:
             u["link"] = links[it["phone"]]
         elif it["phone"] in clear_links or it["method"] == billing.METHOD_CARD:
@@ -517,7 +524,8 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
             continue
         link_phones.add(ph)
         link = str(r[col_link] or "").strip() if col_link < len(r) else ""
-        if link:
+        # ссылка — только веб-адрес (реквизиты «+7913… Яндекс» ссылкой не считаем)
+        if link.lower().startswith(("http://", "https://")):
             links[ph] = link
 
     try:
@@ -557,6 +565,28 @@ def pay_push(zakupka_id: int):
     except Exception as e:
         msg = str(e) if "витрин" in str(e) else f"Ошибка записи в лист: {e}"
     return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}#oplata", status_code=303)
+
+
+@app.post("/api/billing/{zakupka_id}")
+def api_billing(zakupka_id: int, buyer: str = Form(...), field: str = Form(...), value: str = Form("")):
+    """Ручные поля счёта: field=delivery (₽, пусто — цена Яндекса) | payto (реквизиты)."""
+    import billing
+    v = (value or "").strip()
+    if field == "delivery":
+        try:
+            if v:
+                float(v.replace(",", "."))
+        except ValueError:
+            return JSONResponse({"ok": False, "error": "Сумму доставки — числом"})
+        billing.set_fee(zakupka_id, buyer, v)
+    elif field == "payto":
+        billing.set_payto(zakupka_id, buyer, v)
+    else:
+        return JSONResponse({"ok": False, "error": "unknown field"})
+    db = get_db()
+    inv = next((i for i in billing.invoices(db, zakupka_id) if i["buyer"] == buyer), None)
+    db.close()
+    return {"ok": True, "delivery": inv["delivery"] if inv else 0, "total": inv["total"] if inv else 0}
 
 
 @app.post("/api/paymethod/{zakupka_id}")
@@ -967,7 +997,8 @@ async def delete_zakupka(zakupka_id: int):
     db.execute("DELETE FROM nalichie_orders WHERE zakupka_id = ?", (zakupka_id,))
     db.execute("DELETE FROM deliveries WHERE zakupka_id = ?", (zakupka_id,))
     db.execute("DELETE FROM settings WHERE key LIKE ?", (f"box:{zakupka_id}:%",))
-    db.execute("DELETE FROM settings WHERE key LIKE ?", (f"paymethod:{zakupka_id}:%",))
+    for pref in ("paymethod", "delivfee", "payto"):
+        db.execute("DELETE FROM settings WHERE key LIKE ?", (f"{pref}:{zakupka_id}:%",))
     db.execute("DELETE FROM zakupkas WHERE id = ?", (zakupka_id,))
     db.commit()
     db.close()

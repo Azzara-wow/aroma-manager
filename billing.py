@@ -28,6 +28,54 @@ def set_method(zakupka_id, buyer_name, method):
     set_setting(method_key(zakupka_id, buyer_name), METHOD_CARD if method == METHOD_CARD else "")
 
 
+def fee_key(zakupka_id, buyer_name):
+    return f"delivfee:{zakupka_id}:{buyer_name}"
+
+
+def payto_key(zakupka_id, buyer_name):
+    return f"payto:{zakupka_id}:{buyer_name}"
+
+
+def get_fee(zakupka_id, buyer_name):
+    """Доставка, вписанная руками (₽) или None — тогда берём цену Яндекса."""
+    v = get_setting(fee_key(zakupka_id, buyer_name), "").strip()
+    try:
+        return max(int(round(float(v.replace(",", ".")))), 0) if v else None
+    except ValueError:
+        return None
+
+
+def set_fee(zakupka_id, buyer_name, value):
+    set_setting(fee_key(zakupka_id, buyer_name), (value or "").strip())
+
+
+def get_payto(zakupka_id, buyer_name):
+    """Куда переводить (для оплаты на карту), напр. «+79131967569 Яндекс»."""
+    return get_setting(payto_key(zakupka_id, buyer_name), "").strip()
+
+
+def set_payto(zakupka_id, buyer_name, value):
+    set_setting(payto_key(zakupka_id, buyer_name), (value or "").strip())
+
+
+def _bill(zakupka_id, buyer, phone, goods, paid, deliv):
+    """Одна строка счёта. Доставка: вписанная руками побеждает цену Яндекса."""
+    fee = get_fee(zakupka_id, buyer)
+    auto_rub, auto_carrier = deliv.get(phone, (0, ""))
+    d_rub = fee if fee is not None else auto_rub
+    return {
+        "buyer": buyer, "phone": phone, "goods": goods,
+        "delivery": d_rub,
+        "delivery_carrier": "manual" if fee is not None else auto_carrier,
+        "delivery_auto": auto_rub,
+        "delivery_manual": fee,
+        "total": goods + d_rub,
+        "method": get_method(zakupka_id, buyer),
+        "payto": get_payto(zakupka_id, buyer),
+        "paid": paid,
+    }
+
+
 def phone_by_name_map(db):
     return {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
             for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
@@ -80,13 +128,7 @@ def invoices_from_vitrina(db, zakupka_id, vitrina_rows):
         if g <= 0:
             continue
         buyer, paid = dash.get(phone, (f"{phone} - {names.get(phone, '')}", False))
-        g = int(round(g))
-        d_rub, d_carrier = deliv.get(phone, (0, ""))
-        out.append({
-            "buyer": buyer, "phone": phone, "goods": g,
-            "delivery": d_rub, "delivery_carrier": d_carrier, "total": g + d_rub,
-            "method": get_method(zakupka_id, buyer), "paid": paid,
-        })
+        out.append(_bill(zakupka_id, buyer, phone, int(round(g)), paid, deliv))
     out.sort(key=lambda x: x["buyer"].lower())
     return out
 
@@ -105,16 +147,6 @@ def invoices(db, zakupka_id):
     out = []
     for r in rows:
         phone = phone_of(r["buyer_name"], phones)
-        goods = int(round(r["s"] or 0))
-        d_rub, d_carrier = deliv.get(phone, (0, ""))
-        out.append({
-            "buyer": r["buyer_name"],
-            "phone": phone,
-            "goods": goods,
-            "delivery": d_rub,
-            "delivery_carrier": d_carrier,
-            "total": goods + d_rub,
-            "method": get_method(zakupka_id, r["buyer_name"]),
-            "paid": bool(r["paid"]),
-        })
+        out.append(_bill(zakupka_id, r["buyer_name"], phone, int(round(r["s"] or 0)),
+                         bool(r["paid"]), deliv))
     return out
