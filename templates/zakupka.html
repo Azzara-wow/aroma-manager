@@ -131,6 +131,29 @@
     {% else %}
     <span class="badge bg-secondary ms-2">Архив</span>
     {% endif %}
+    {% if zakupka.status == 'active' %}
+    <button type="button" class="btn btn-success btn-sm ms-2" id="sync-open">
+        <i class="bi bi-arrow-repeat"></i> Обновить из витрины
+    </button>
+    {% endif %}
+</div>
+
+<!-- Обновление из витрины: сначала показываем разницу, пишем только по «Применить» -->
+<div class="modal fade" id="syncModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-arrow-repeat"></i> Обновить из витрины</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="sync-body">Загружаю…</div>
+      <div class="modal-footer">
+        <span class="small text-muted me-auto">Статусы розлива, упаковки и оплаты не меняются.</span>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
+        <button type="button" class="btn btn-success" id="sync-apply" disabled>Применить</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Табы -->
@@ -408,7 +431,16 @@
               <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm" style="max-width:210px" required>
               <button class="btn btn-outline-primary btn-sm" type="submit"><i class="bi bi-upload"></i> Загрузить ссылки</button>
             </form>
-            <span class="text-muted small">Выгрузи (Телефон · Имя Фамилия · E-mail) → поставщик впишет ссылки → загрузи обратно.</span>
+            <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-push" class="m-0">
+              <button class="btn btn-outline-secondary btn-sm" type="submit" title="Суммы, доставка и отметки оплаты — без файла, ссылки не трогаются">
+                <i class="bi bi-arrow-up-circle"></i> Обновить суммы в витрине
+              </button>
+            </form>
+            <div class="text-muted small w-100">
+              Выгрузи → в файле сверху те, кто платит <b>по ссылке</b>, ниже — <b>на карту</b> (строку можно перенести вниз руками).
+              Поставщик впишет ссылки → загрузи обратно: девочки увидят в витрине закупку, доставку и итог.
+              Галочка «Оплата закупки» — только за реальную оплату: она сразу показывает в витрине «Оплачено ✓».
+            </div>
           </div>
         </div>
         <div class="card shadow-sm mb-3">
@@ -459,6 +491,9 @@
                             <tr>
                                 <th>Покупатель</th>
                                 <th>Сумма закупки</th>
+                                <th>Доставка</th>
+                                <th>Итого</th>
+                                <th>Способ</th>
                                 <th>Оплата закупки</th>
                                 <th>Сумма наличия</th>
                                 <th>Оплата наличия</th>
@@ -474,6 +509,16 @@
                                 data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
                                 <td><strong>{{ buyer_name }}</strong></td>
                                 <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
+                                <td>{{ data.delivery if data.delivery else "—" }}</td>
+                                <td><strong>{{ data.bill_total if data.bill_total else "—" }}</strong></td>
+                                <td>
+                                    {% if data.sum_zakupka > 0 %}
+                                    <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
+                                            data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
+                                        {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
+                                    </button>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     {% if data.sum_zakupka > 0 %}
                                     <input type="checkbox"
@@ -534,6 +579,13 @@
                         </div>
                         <div class="m-pay-rows">
                             {% if data.sum_zakupka and data.sum_zakupka > 0 %}
+                            <div class="m-pay-row">
+                                <span>{% if data.delivery %}Доставка {{ data.delivery }} ₽ · итого <b>{{ data.bill_total }} ₽</b>{% else %}Способ оплаты{% endif %}</span>
+                                <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
+                                        data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
+                                    {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
+                                </button>
+                            </div>
                             <label class="m-pay-row">
                                 <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
                                 <input type="checkbox" class="m-paycheck" data-paykind="payment-zakupka"
@@ -566,7 +618,7 @@
             <div class="card-body">
                 <div class="alert alert-light border small mb-3">
                     Правь состав закупки прямо здесь — объём, аромат, покупателя. Сумма считается
-                    автоматически (объём ÷ 10 × цена за 10 мл), но её можно поправить руками.
+                    автоматически (объём × цена за 1 мл, у Базы — штуки × цена за штуку), но её можно поправить руками.
                     Изменения сразу в базе — гуглшит и перезагрузка не нужны.
                     <b>Статусы (разлито/упаковано/оплата) не меняются.</b>
                 </div>
@@ -576,15 +628,16 @@
                             <th style="min-width:150px">Покупатель</th>
                             <th style="min-width:150px">Аромат</th>
                             <th>Объём, мл</th>
-                            <th>Цена/10мл</th>
+                            <th>Цена за мл</th>
                             <th>Сумма</th>
                             <th></th>
                         </tr></thead>
                         <tbody>
                         {% for it in sostav_items %}
-                        <tr data-id="{{ it.id }}">
+                        <tr data-id="{{ it.id }}"{% if it.ext_gone %} class="table-danger"{% endif %}>
                             <td><input class="form-control form-control-sm s-buyer" value="{{ it.buyer_name }}"></td>
-                            <td><input class="form-control form-control-sm s-aroma" value="{{ it.aroma_name }}"></td>
+                            <td><input class="form-control form-control-sm s-aroma" value="{{ it.aroma_name }}">
+                                {% if it.ext_gone %}<div class="small text-danger mt-1">убрано в витрине, но уже разлито — реши сама</div>{% endif %}</td>
                             <td><input type="number" class="form-control form-control-sm s-vol" value="{{ it.volume_ml }}" style="max-width:88px"></td>
                             <td><input type="number" step="0.01" class="form-control form-control-sm s-price" value="{{ it.price_per_10ml }}" style="max-width:96px"></td>
                             <td><input type="number" step="0.01" class="form-control form-control-sm s-sum" value="{{ it.total_sum }}" style="max-width:104px"></td>
@@ -939,6 +992,93 @@ function initTabToolbars() {
     });
 }
 
+// после выгрузки/загрузки счетов возвращаемся сразу на вкладку «Оплата»
+if (location.hash === '#oplata' || {{ 'true' if paymsg else 'false' }}) {
+    const t = document.getElementById('oplata-tab');
+    if (t) bootstrap.Tab.getOrCreateInstance(t).show();
+}
+
+// === Способ оплаты: по ссылке / на карту (разметка, не факт оплаты) ===
+document.addEventListener('click', async function (e) {
+    const btn = e.target.closest('.paymethod-btn');
+    if (!btn) return;
+    e.preventDefault();
+    const buyer = btn.dataset.buyer;
+    const next = btn.dataset.method === 'card' ? 'link' : 'card';
+    const fd = new FormData();
+    fd.append('buyer', buyer);
+    fd.append('method', next);
+    try {
+        const j = await (await fetch('/api/paymethod/{{ zakupka.id }}', { method: 'POST', body: fd })).json();
+        if (!j.ok) return;
+        document.querySelectorAll('.paymethod-btn').forEach(function (b) {
+            if (b.dataset.buyer !== buyer) return;   // десктоп + мобильный двойник
+            b.dataset.method = j.method;
+            b.textContent = j.method === 'card' ? '🏦 на карту' : '🔗 по ссылке';
+            b.classList.toggle('btn-outline-warning', j.method === 'card');
+            b.classList.toggle('btn-outline-primary', j.method !== 'card');
+        });
+    } catch (err) { alert('Сбой сети — способ оплаты не сохранён'); }
+});
+
+// === Обновление из витрины: превью разницы → применить ===
+(function () {
+    const btn = document.getElementById('sync-open');
+    if (!btn) return;
+    const ZID = {{ zakupka.id }};
+    const body = document.getElementById('sync-body');
+    const apply = document.getElementById('sync-apply');
+    const modal = new bootstrap.Modal(document.getElementById('syncModal'));
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const rub = v => Math.round(v || 0).toLocaleString('ru-RU') + ' ₽';
+
+    function block(title, cls, rows, fmt) {
+        if (!rows.length) return '';
+        return '<h6 class="mt-3 ' + cls + '">' + title + ' — ' + rows.length + '</h6>' +
+            '<table class="table table-sm small mb-1"><tbody>' +
+            rows.map(r => '<tr><td>' + esc(r.buyer) + '</td><td>' + esc(r.aroma) + '</td><td class="text-end text-nowrap">' + fmt(r) + '</td></tr>').join('') +
+            '</tbody></table>';
+    }
+
+    async function load() {
+        body.innerHTML = 'Загружаю состав из витрины…';
+        apply.disabled = true;
+        try {
+            const j = await (await fetch('/zakupka/' + ZID + '/sync')).json();
+            if (!j.ok) { body.innerHTML = '<div class="alert alert-danger">' + esc(j.error) + '</div>'; return; }
+            const d = j.diff;
+            const total = d.added.length + d.changed.length + d.removed.length + d.kept.length;
+            let html = '';
+            if (!total) html = '<div class="alert alert-success mb-0">Всё совпадает с витриной, менять нечего ✓</div>';
+            html += block('➕ Новые', 'text-success', d.added, r => r.volume + ' мл · ' + rub(r.amount));
+            html += block('✏️ Изменились', 'text-primary', d.changed,
+                r => r.old_volume + ' → <b>' + r.volume + '</b> мл · ' + rub(r.old_amount) + ' → <b>' + rub(r.amount) + '</b>'
+                     + (r.rozliv ? ' <span class="badge bg-warning text-dark">уже разлито</span>' : ''));
+            html += block('✕ Убраны в витрине (удалим)', 'text-danger', d.removed, r => r.volume + ' мл');
+            html += block('⚠ Убраны в витрине, но уже разлиты (оставим с пометкой)', 'text-warning', d.kept, r => r.volume + ' мл');
+            html += '<div class="small text-muted mt-3">Без изменений: ' + d.unchanged +
+                (d.manual ? ' · добавлены руками (не трогаем): ' + d.manual : '') + '</div>';
+            if (j.problems && j.problems.length) {
+                html += '<div class="alert alert-warning small mt-2 mb-0"><b>В витрине есть позиции без цены, их нет в счёте:</b><br>' +
+                    j.problems.map(p => esc(p.buyer) + ' · ' + esc(p.aroma) + ' ' + p.volume + ' мл (' + esc(p.reason) + ')').join('<br>') + '</div>';
+            }
+            body.innerHTML = html;
+            apply.disabled = !total;
+        } catch (e) { body.innerHTML = '<div class="alert alert-danger">Сбой сети</div>'; }
+    }
+
+    btn.addEventListener('click', function () { modal.show(); load(); });
+    apply.addEventListener('click', async function () {
+        apply.disabled = true;
+        apply.textContent = 'Применяю…';
+        try {
+            const j = await (await fetch('/zakupka/' + ZID + '/sync/apply', { method: 'POST' })).json();
+            if (!j.ok) { body.innerHTML = '<div class="alert alert-danger">' + esc(j.error) + '</div>'; apply.textContent = 'Применить'; return; }
+            location.reload();
+        } catch (e) { body.innerHTML = '<div class="alert alert-danger">Сбой сети</div>'; apply.textContent = 'Применить'; }
+    });
+})();
+
 // === Редактирование состава закупки (AJAX, статусы не трогаем) ===
 (function () {
     const ZID = {{ zakupka.id }};
@@ -956,7 +1096,8 @@ function initTabToolbars() {
     function autoSum(tr) {
         const vol = parseFloat(tr.querySelector('.s-vol').value) || 0;
         const price = parseFloat(tr.querySelector('.s-price').value) || 0;
-        tr.querySelector('.s-sum').value = Math.round(vol / 10 * price * 100) / 100;
+        // как в витрине: цена за 1 мл (или за штуку у Базы) × количество, вверх до рубля
+        tr.querySelector('.s-sum').value = Math.ceil(vol * price - 1e-9);
     }
     function rowForm(tr) {
         const fd = new FormData();

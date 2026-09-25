@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -90,8 +90,8 @@ async def index(request: Request):
 
 # === Страница создания новой закупки ===
 @app.get("/zakupka/new", response_class=HTMLResponse)
-async def new_zakupka_form(request: Request):
-    return templates.TemplateResponse("zakupka_new.html", {"request": request})
+async def new_zakupka_form(request: Request, err: str = ""):
+    return templates.TemplateResponse("zakupka_new.html", {"request": request, "error": err or None})
 
 
 @app.post("/zakupka/new")
@@ -323,6 +323,15 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             buyers_summary[buyer_name]["phone"] = ""
             buyers_summary[buyer_name]["address"] = ""
 
+    # счёт: доставка (Яндекс за наш счёт), итого, способ оплаты (ссылка/карта)
+    import billing
+    inv_by_buyer = {i["buyer"]: i for i in billing.invoices(db, zakupka_id)}
+    for buyer_name, data in buyers_summary.items():
+        inv = inv_by_buyer.get(buyer_name)
+        data["delivery"] = inv["delivery"] if inv else 0
+        data["bill_total"] = inv["total"] if inv else 0
+        data["method"] = inv["method"] if inv else billing.METHOD_LINK
+
     buyers_summary_sorted = sorted(buyers_summary.items(), key=lambda x: x[0])
 
     total_buyers = len(buyers_summary_sorted)
@@ -334,7 +343,8 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
 
     # === СОСТАВ (редактируемые позиции закупки) ===
     sostav_items = [row_to_dict(r) for r in db.execute(
-        "SELECT id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum "
+        "SELECT id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum, "
+        "COALESCE(ext_gone, 0) AS ext_gone "
         "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name, aroma_name",
         (zakupka_id,),
     ).fetchall()]
@@ -366,26 +376,25 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
     )
 
 
+PAY_SECTION_LINK = "ПО ССЫЛКЕ — впишите ссылку на оплату"
+PAY_SECTION_CARD = "НА КАРТУ — ссылка не нужна (можно перенести сюда строку сверху)"
+PAY_SECTION_PAID = "УЖЕ ОПЛАЧЕНО — для сведения, при загрузке не читается"
+
+
 @app.get("/zakupka/{zakupka_id}/pay-export")
 def pay_export(zakupka_id: int):
-    """Excel для поставщика (генерация ссылок на оплату): Телефон / Имя Фамилия /
-    E-mail + пустая колонка «Ссылка на оплату». Только покупатели с суммой закупки."""
-    import io
+    """Excel для поставщика: сверху — кто платит по ссылке (колонка для ссылки),
+    ниже — кто платит на карту, в конце — уже оплатившие. Закупка · Доставка · Итого."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.styles import Font, PatternFill
+    import billing
 
     db = get_db()
     zak = db.execute("SELECT * FROM zakupkas WHERE id = ?", (zakupka_id,)).fetchone()
     if not zak:
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
-    sums = db.execute(
-        "SELECT buyer_name, SUM(total_sum) AS s FROM zakaz_items "
-        "WHERE zakupka_id = ? GROUP BY buyer_name HAVING s > 0 ORDER BY buyer_name",
-        (zakupka_id,),
-    ).fetchall()
-    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
-                     for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
+    inv = billing.invoices(db, zakupka_id)
     db.close()
     try:
         recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
@@ -395,107 +404,148 @@ def pay_export(zakupka_id: int):
     wb = Workbook()
     ws = wb.active
     ws.title = "Оплата"
-    headers = ["Телефон", "Имя Фамилия", "E-mail", "Сумма закупки", "Ссылка на оплату"]
-    ws.append(headers)
-    head_fill = PatternFill("solid", fgColor="D9E1F2")
-    thin = Side(style="thin", color="BBBBBB")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for c in ws[1]:
+    _xlsx_header(ws, ["Телефон", "Имя Фамилия", "E-mail", "Закупка, ₽", "Доставка, ₽",
+                      "Итого к оплате, ₽", "Ссылка на оплату"], [16, 26, 28, 12, 12, 16, 44])
+
+    def section(title, color, items):
+        ws.append([title])
+        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=7)
+        c = ws.cell(row=ws.max_row, column=1)
         c.font = Font(bold=True)
-        c.fill = head_fill
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = border
+        c.fill = PatternFill("solid", fgColor=color)
+        for it in items:
+            rec = recips.get(it["phone"]) if it["phone"] else None
+            fio = (((rec.get("first_name", "") + " " + rec.get("last_name", "")).strip() if rec else "")
+                   or it["buyer"].split(" - ", 1)[-1])
+            ws.append([it["phone"], fio, rec.get("email", "") if rec else "",
+                       it["goods"], it["delivery"] or "", it["total"], ""])
+            for cell in ws[ws.max_row]:
+                cell.border = ws._thin_border
 
-    for row in sums:
-        buyer = row["buyer_name"]
-        phone = phone_by_name.get(buyer, "") or buyers_sheet.phone_from_name(buyer)
-        rec = recips.get(phone) if phone else None
-        fio = ""
-        if rec:
-            fio = (rec.get("first_name", "") + " " + rec.get("last_name", "")).strip()
-        fio = fio or buyer
-        email = rec.get("email", "") if rec else ""
-        ws.append([phone, fio, email, round(row["s"] or 0), ""])
-        for c in ws[ws.max_row]:
-            c.border = border
+    section(PAY_SECTION_LINK, "E2EFDA", [i for i in inv if not i["paid"] and i["method"] == billing.METHOD_LINK])
+    ws.append([])
+    section(PAY_SECTION_CARD, "FCE4D6", [i for i in inv if not i["paid"] and i["method"] == billing.METHOD_CARD])
+    ws.append([])
+    section(PAY_SECTION_PAID, "EDEDED", [i for i in inv if i["paid"]])
+    return _xlsx_response(wb, f"oplata_{zakupka_id}.xlsx")
 
-    for i, w in enumerate([16, 26, 26, 14, 40], start=1):
-        ws.column_dimensions[chr(64 + i)].width = w
-    ws.freeze_panes = "A2"
 
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="oplata_{zakupka_id}.xlsx"'},
-    )
+def _push_invoices(zakupka_id, links=None, clear_links=()):
+    """Отправить счета закупки в витрину (лист «Покупатели», Q:T): итого, доставка,
+    честная отметка оплаты; ссылки — из links, у clear_links ссылка стирается."""
+    import billing
+    db = get_db()
+    inv = billing.invoices(db, zakupka_id)
+    db.close()
+    links = links or {}
+    updates = {}
+    for it in inv:
+        if not it["phone"]:
+            continue
+        u = {"amount": it["total"], "delivery": it["delivery"] or "",
+             "paid": buyers_sheet.PAID_MARK if it["paid"] else ""}
+        if it["phone"] in links:
+            u["link"] = links[it["phone"]]
+        elif it["phone"] in clear_links or it["method"] == billing.METHOD_CARD:
+            u["link"] = ""
+        updates[it["phone"]] = u
+    return buyers_sheet.set_pay_fields_bulk(updates), len(inv)
 
 
 @app.post("/zakupka/{zakupka_id}/pay-import")
 def pay_import(zakupka_id: int, file: UploadFile = File(...)):
-    """Загрузка Excel от поставщика: разложить ссылки на оплату по телефонам (кол. Q)."""
+    """Загрузка Excel от поставщика. Блок «по ссылке» — ссылки в витрину; строки блока
+    «на карту» — способ оплаты «на карту» (ссылки нет). Суммы и доставку берём из
+    дашборда (источник правды), а не из файла."""
     import io
     from urllib.parse import quote
     from openpyxl import load_workbook
+    import billing
 
     def _back(msg):
-        return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}", status_code=303)
+        return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}#oplata", status_code=303)
 
     try:
-        data = file.file.read()
-        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
+        wb = load_workbook(io.BytesIO(file.file.read()), read_only=True, data_only=True)
+        rows = list(wb.active.iter_rows(values_only=True))
     except Exception as e:
         return _back(f"Не удалось прочитать файл: {e}")
     if not rows:
         return _back("Файл пустой.")
 
-    # ищем колонки «телефон» и «ссылка» по шапке
     header = [str(c or "").strip().lower() for c in rows[0]]
     col_phone = next((i for i, h in enumerate(header) if "телефон" in h or "phone" in h), None)
-    col_link = next((i for i, h in enumerate(header) if "ссылк" in h or "оплат" in h or "link" in h), None)
+    col_link = next((i for i, h in enumerate(header) if "ссылк" in h or "link" in h), None)
     if col_phone is None or col_link is None:
         return _back("В файле нет колонок «Телефон» и «Ссылка на оплату».")
 
-    links = {}
+    links, card_phones, link_phones = {}, set(), set()
+    mode = "link"   # старые файлы без разделов — всё считается «по ссылке»
     for r in rows[1:]:
-        if col_phone >= len(r) or col_link >= len(r):
+        first = str(r[0] or "").strip().upper() if r else ""
+        if first.startswith("ПО ССЫЛКЕ"):
+            mode = "link"; continue
+        if first.startswith("НА КАРТУ"):
+            mode = "card"; continue
+        if first.startswith("УЖЕ ОПЛАЧЕНО"):
+            mode = "skip"; continue
+        if mode == "skip" or col_phone >= len(r):
             continue
-        ph = buyers_sheet.normalize_phone(r[col_phone])
-        link = str(r[col_link] or "").strip()
-        if buyers_sheet.valid_phone(ph) and link:
+        ph = buyers_sheet.normalize_phone(r[col_phone] or "")
+        if not buyers_sheet.valid_phone(ph):
+            continue
+        if mode == "card":
+            card_phones.add(ph)
+            continue
+        link_phones.add(ph)
+        link = str(r[col_link] or "").strip() if col_link < len(r) else ""
+        if link:
             links[ph] = link
-    if not links:
-        return _back("В файле не найдено ни одной ссылки с телефоном.")
 
-    # суммы к оплате берём из закупки (источник правды дашборда), а не из файла
+    # способ оплаты в дашборде — как разложено в файле (строку можно перенести вниз руками)
     db = get_db()
-    sums = db.execute(
-        "SELECT buyer_name, SUM(total_sum) AS s FROM zakaz_items WHERE zakupka_id = ? GROUP BY buyer_name",
-        (zakupka_id,),
-    ).fetchall()
-    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
-                     for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
+    phones = billing.phone_by_name_map(db)
+    for b in db.execute("SELECT DISTINCT buyer_name FROM zakaz_items WHERE zakupka_id = ?",
+                        (zakupka_id,)).fetchall():
+        ph = billing.phone_of(b["buyer_name"], phones)
+        if ph in card_phones:
+            billing.set_method(zakupka_id, b["buyer_name"], billing.METHOD_CARD)
+        elif ph in link_phones:
+            billing.set_method(zakupka_id, b["buyer_name"], billing.METHOD_LINK)
     db.close()
-    sums_by_phone = {}
-    for row in sums:
-        ph = phone_by_name.get(row["buyer_name"], "") or buyers_sheet.phone_from_name(row["buyer_name"])
-        if ph:
-            sums_by_phone[ph] = round(row["s"] or 0)
-    amounts = {ph: sums_by_phone[ph] for ph in links if ph in sums_by_phone}
 
     try:
-        res = buyers_sheet.set_pay_links_bulk(links, amounts)
+        res, n = _push_invoices(zakupka_id, links=links, clear_links=card_phones)
     except Exception as e:
         return _back(f"Ошибка записи в лист: {e}")
-    msg = f"Внесено ссылок: {res.get('updated', 0)}."
+    msg = (f"Счета отправлены в витрину: {n}. Ссылок внесено: {len(links)}"
+           f"{f', на карту: {len(card_phones)}' if card_phones else ''}.")
     nf = res.get("not_found") or []
     if nf:
-        msg += f" Не нашлись в листе: {len(nf)} (тел.: {', '.join(nf[:5])}{'…' if len(nf) > 5 else ''})."
+        msg += f" Не нашлись в листе «Покупатели»: {len(nf)} (тел.: {', '.join(nf[:5])}{'…' if len(nf) > 5 else ''})."
     return _back(msg)
+
+
+@app.post("/zakupka/{zakupka_id}/pay-push")
+def pay_push(zakupka_id: int):
+    """Без файла: обновить в витрине суммы, доставку и отметки оплаты (ссылки не трогаем)."""
+    from urllib.parse import quote
+    try:
+        res, n = _push_invoices(zakupka_id)
+        msg = f"Счета обновлены в витрине: {n}."
+        if res.get("not_found"):
+            msg += f" Не нашлись в листе: {len(res['not_found'])}."
+    except Exception as e:
+        msg = f"Ошибка записи в лист: {e}"
+    return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}#oplata", status_code=303)
+
+
+@app.post("/api/paymethod/{zakupka_id}")
+def api_paymethod(zakupka_id: int, buyer: str = Form(...), method: str = Form(...)):
+    """Способ оплаты покупателя: link | card (разметка, не факт оплаты)."""
+    import billing
+    billing.set_method(zakupka_id, buyer, method)
+    return {"ok": True, "method": billing.get_method(zakupka_id, buyer)}
 
 
 def _xlsx_response(wb, filename):
@@ -643,8 +693,22 @@ async def toggle_upakovka(item_id: int, source: str = "zakupka"):
     return {"ok": True, "new_value": new_val}
 
 
+def _sheet_paid(buyer_name, paid):
+    """Честная отметка оплаты → витрина (лист «Покупатели», кол. T). Ошибки не роняют клик."""
+    import billing
+    try:
+        db = get_db()
+        phone = billing.phone_of(buyer_name, billing.phone_by_name_map(db))
+        db.close()
+        if phone:
+            buyers_sheet.set_paid(phone, paid)
+    except Exception as e:
+        print(f"[paid→витрина] {buyer_name}: {e}")
+
+
 @app.post("/api/status/payment-zakupka/{buyer_name}")
-async def toggle_payment_zakupka(buyer_name: str, zakupka_id: int = Form(...)):
+def toggle_payment_zakupka(buyer_name: str, background: BackgroundTasks, zakupka_id: int = Form(...)):
+    new_val = 0
     db = get_db()
     items = db.execute(
         "SELECT zi.id FROM zakaz_items zi WHERE zi.zakupka_id = ? AND zi.buyer_name = ?",
@@ -666,6 +730,7 @@ async def toggle_payment_zakupka(buyer_name: str, zakupka_id: int = Form(...)):
             )
 
         db.commit()
+        background.add_task(_sheet_paid, buyer_name, bool(new_val))
 
     db.close()
     return {"ok": True, "new_value": new_val}
@@ -809,6 +874,66 @@ def item_delete(zakupka_id: int, item_id: int):
     return JSONResponse({"ok": True})
 
 
+# === Синхронизация с витриной (aroma_web): импорт и обновление без гуглшита ===
+@app.post("/zakupka/import-vitrina")
+def import_vitrina(name: str = Form(...), clear_bills: str = Form("")):
+    """Новая закупка сразу со всем составом из витрины. clear_bills — стереть в витрине
+    счета прошлой закупки (ссылки, суммы, доставку, «оплачено»)."""
+    from urllib.parse import quote
+    import vitrina_sync
+    try:
+        data = vitrina_sync.fetch()
+    except Exception as e:
+        return RedirectResponse(url=f"/zakupka/new?err={quote(str(e))}", status_code=303)
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO zakupkas (name, google_sheet_url, status, created_at) VALUES (?, 'vitrina', 'active', ?)",
+        (name.strip() or "Закупка", datetime.now().strftime("%Y-%m-%d %H:%M")))
+    zid = cur.lastrowid
+    vitrina_sync.apply_diff(db, zid, vitrina_sync.compute_diff(db, zid, data["rows"]))
+    db.commit()
+    db.close()
+    msg = ""
+    if clear_bills:
+        try:
+            buyers_sheet.set_pay_fields_bulk({}, clear_others=True)
+            msg = "Счета прошлой закупки в витрине очищены."
+        except Exception as e:
+            msg = f"Закупка создана, но счета в витрине очистить не удалось: {e}"
+    return RedirectResponse(url=f"/zakupka/{zid}?paymsg={quote(msg)}" if msg else f"/zakupka/{zid}",
+                            status_code=303)
+
+
+@app.get("/zakupka/{zakupka_id}/sync")
+def sync_preview(zakupka_id: int):
+    """Что изменится при «Обновить из витрины» (ничего не пишет)."""
+    import vitrina_sync
+    try:
+        data = vitrina_sync.fetch()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    db = get_db()
+    diff = vitrina_sync.compute_diff(db, zakupka_id, data["rows"])
+    db.close()
+    return JSONResponse({"ok": True, "diff": diff, "problems": data.get("problems", [])})
+
+
+@app.post("/zakupka/{zakupka_id}/sync/apply")
+def sync_apply(zakupka_id: int):
+    """Применить: берём свежий состав витрины (на момент нажатия) и раскладываем разницу."""
+    import vitrina_sync
+    try:
+        data = vitrina_sync.fetch()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    db = get_db()
+    diff = vitrina_sync.compute_diff(db, zakupka_id, data["rows"])
+    vitrina_sync.apply_diff(db, zakupka_id, diff)
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True, "counts": {k: len(diff[k]) for k in ("added", "changed", "removed", "kept")}})
+
+
 @app.post("/zakupka/{zakupka_id}/delete")
 async def delete_zakupka(zakupka_id: int):
     """Полное удаление закупки со всем связанным. Только для архивных (closed)."""
@@ -823,6 +948,7 @@ async def delete_zakupka(zakupka_id: int):
     db.execute("DELETE FROM nalichie_orders WHERE zakupka_id = ?", (zakupka_id,))
     db.execute("DELETE FROM deliveries WHERE zakupka_id = ?", (zakupka_id,))
     db.execute("DELETE FROM settings WHERE key LIKE ?", (f"box:{zakupka_id}:%",))
+    db.execute("DELETE FROM settings WHERE key LIKE ?", (f"paymethod:{zakupka_id}:%",))
     db.execute("DELETE FROM zakupkas WHERE id = ?", (zakupka_id,))
     db.commit()
     db.close()
@@ -1194,7 +1320,8 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         "origin_cdek_code": get_setting("origin_cdek_code", ""),
         "origin_cdek_address": get_setting("origin_cdek_address", ""),
         "confirmed_carriers": confirmed_carriers,
-        "paid_by": __import__("carriers").paid_by(),
+        "paid_by_yandex": __import__("carriers").paid_by(carrier="yandex"),
+        "paid_by_cdek": __import__("carriers").paid_by(carrier="cdek"),
         "supplier_boxes": [{"code": b.code, "name": b.name} for b in parcel.SUPPLIER_BOXES],
         "msg": msg,
     })
@@ -1405,7 +1532,7 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             offer_id = off.get("offer_id", "")
             # Покупатель платит доставку → пересоздаём оффер с наложенным платежом
             # (сумму знаем только после первого оффера).
-            if carriers.paid_by() == "recipient":
+            if carriers.paid_by(carrier="yandex") == "recipient":
                 payload["info"]["operator_request_id"] = opid + "-cod"
                 payload["billing_info"] = {"payment_method": "card_on_receipt",
                                            "delivery_cost": carriers.price_to_kopecks(price)}

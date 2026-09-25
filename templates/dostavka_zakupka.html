@@ -27,7 +27,11 @@
 
 <div class="small mb-2">
   Доставку оплачивает:
-  {% if paid_by == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
+  Яндекс —
+  {% if paid_by_yandex == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
+  {% else %}<span class="badge bg-secondary">мы, покупателю — строкой в счёте</span>{% endif %}
+  · СДЭК —
+  {% if paid_by_cdek == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
   {% else %}<span class="badge bg-secondary">продавец</span>{% endif %}
 </div>
 

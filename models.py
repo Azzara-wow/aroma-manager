@@ -130,6 +130,12 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE deliveries ADD COLUMN cdek_number TEXT DEFAULT ''")
 
+    # Позиция убрана в витрине, но уже разлита — оставлена с пометкой (синхронизация)
+    try:
+        c.execute("SELECT ext_gone FROM zakaz_items LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE zakaz_items ADD COLUMN ext_gone INTEGER DEFAULT 0")
+
     # Включаем режим WAL — позволяет читать базу во время записи,
     # это заметно снижает шанс блокировок "database is locked"
     c.execute("PRAGMA journal_mode=WAL")

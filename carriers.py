@@ -58,9 +58,12 @@ def normalize(carrier):
     return "cdek" if str(carrier or "").lower() == "cdek" else "yandex"
 
 
-def paid_by(cfg: Optional[DeliveryConfig] = None):
+def paid_by(cfg: Optional[DeliveryConfig] = None, carrier=None):
     """'recipient' — доставку оплачивает покупатель (наложенный платёж); иначе 'seller'.
-    Приоритет — значение из cfg (личный кабинет клиента); иначе общий флаг из .env."""
+    Приоритет — значение из cfg (личный кабинет клиента); затем флаг перевозчика
+    DELIVERY_PAID_BY_YANDEX / DELIVERY_PAID_BY_CDEK; затем общий DELIVERY_PAID_BY.
+    Яндекс по умолчанию — за наш счёт (seller): стоимость доставки идёт отдельной
+    строкой в счёт покупателя (решение Елены 2026-09-26)."""
     if cfg is not None and cfg.paid_by:
         return cfg.paid_by.lower()
     try:
@@ -68,7 +71,20 @@ def paid_by(cfg: Optional[DeliveryConfig] = None):
         ycfg._load_dotenv()
     except Exception:
         pass
+    if carrier:
+        c = normalize(carrier)
+        own = os.environ.get("DELIVERY_PAID_BY_" + c.upper(), "").strip().lower()
+        if own:
+            return own
+        if c == "yandex":
+            return "seller"
     return os.environ.get("DELIVERY_PAID_BY", "seller").lower()
+
+
+def invoice_delivery_rub(price_str):
+    """Стоимость доставки для счёта покупателя: вверх до 10 ₽ (312.40 → 320). 0 — если цены нет."""
+    kop = price_to_kopecks(price_str)
+    return int(-(-kop // 1000) * 10) if kop > 0 else 0
 
 
 def price_to_kopecks(price_str):
@@ -135,7 +151,7 @@ def _cdek_book(rec, calc, opid, origin_code, cfg=None):
     try:
         c = _cdek_client(cfg)
         recipient_cost = None
-        if paid_by(cfg) == "recipient":
+        if paid_by(cfg, "cdek") == "recipient":
             price = _cdek_delivery_price(c, origin_code, rec, calc)
             if not price:
                 return {"ok": False,
