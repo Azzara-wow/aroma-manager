@@ -606,10 +606,9 @@
                                     {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
                                 </button>
                             </div>
-                            <div class="m-pay-row">
+                            <div class="m-pay-row"{% if data.method != 'card' %} hidden{% endif %}>
                                 <input type="text" class="form-control form-control-sm bill-payto" data-buyer="{{ buyer_name }}"
-                                       value="{{ data.payto }}" placeholder="куда переводить: +7913… Яндекс"
-                                       {% if data.method != 'card' %}hidden{% endif %}>
+                                       value="{{ data.payto }}" placeholder="куда переводить: +7913… Яндекс">
                             </div>
                             <label class="m-pay-row">
                                 <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
@@ -1044,7 +1043,9 @@ document.addEventListener('click', async function (e) {
             b.classList.toggle('btn-outline-primary', j.method !== 'card');
         });
         document.querySelectorAll('.bill-payto').forEach(function (i) {
-            if (i.dataset.buyer === buyer) i.hidden = (j.method !== 'card');
+            if (i.dataset.buyer !== buyer) return;
+            const row = i.closest('.m-pay-row');          // на телефоне прячем всю строку
+            if (row) row.hidden = (j.method !== 'card'); else i.hidden = (j.method !== 'card');
         });
     } catch (err) { alert('Сбой сети — способ оплаты не сохранён'); }
 });
