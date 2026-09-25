@@ -394,8 +394,12 @@ def pay_export(zakupka_id: int):
     if not zak:
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
-    inv = billing.invoices(db, zakupka_id)
     db.close()
+    try:
+        inv = _vitrina_invoices(zakupka_id)
+    except Exception as e:
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(str(e))}#oplata", status_code=303)
     try:
         recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
     except Exception:
@@ -430,13 +434,27 @@ def pay_export(zakupka_id: int):
     return _xlsx_response(wb, f"oplata_{zakupka_id}.xlsx")
 
 
-def _push_invoices(zakupka_id, links=None, clear_links=()):
+def _vitrina_invoices(zakupka_id):
+    """Счета закупки: сумма заказа — ИЗ ВИТРИНЫ (истина), доставка/способ/оплата — из
+    дашборда. Витрина недоступна → исключение с понятным текстом (счёт не выставляем)."""
+    import billing
+    import vitrina_sync
+    try:
+        rows = vitrina_sync.fetch()["rows"]
+    except Exception as e:
+        raise RuntimeError(f"Не удалось взять суммы из витрины, счета не тронуты. {e}")
+    db = get_db()
+    inv = billing.invoices_from_vitrina(db, zakupka_id, rows)
+    db.close()
+    return inv
+
+
+def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
     """Отправить счета закупки в витрину (лист «Покупатели», Q:T): итого, доставка,
     честная отметка оплаты; ссылки — из links, у clear_links ссылка стирается."""
     import billing
-    db = get_db()
-    inv = billing.invoices(db, zakupka_id)
-    db.close()
+    if inv is None:
+        inv = _vitrina_invoices(zakupka_id)
     links = links or {}
     updates = {}
     for it in inv:
@@ -455,8 +473,8 @@ def _push_invoices(zakupka_id, links=None, clear_links=()):
 @app.post("/zakupka/{zakupka_id}/pay-import")
 def pay_import(zakupka_id: int, file: UploadFile = File(...)):
     """Загрузка Excel от поставщика. Блок «по ссылке» — ссылки в витрину; строки блока
-    «на карту» — способ оплаты «на карту» (ссылки нет). Суммы и доставку берём из
-    дашборда (источник правды), а не из файла."""
+    «на карту» — способ оплаты «на карту» (ссылки нет). Суммы заказа — из витрины
+    (там истина), доставка — из дашборда; из файла суммы не читаем."""
     import io
     from urllib.parse import quote
     from openpyxl import load_workbook
@@ -502,20 +520,21 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
         if link:
             links[ph] = link
 
+    try:
+        inv = _vitrina_invoices(zakupka_id)
+    except Exception as e:
+        return _back(str(e))
     # способ оплаты в дашборде — как разложено в файле (строку можно перенести вниз руками)
-    db = get_db()
-    phones = billing.phone_by_name_map(db)
-    for b in db.execute("SELECT DISTINCT buyer_name FROM zakaz_items WHERE zakupka_id = ?",
-                        (zakupka_id,)).fetchall():
-        ph = billing.phone_of(b["buyer_name"], phones)
-        if ph in card_phones:
-            billing.set_method(zakupka_id, b["buyer_name"], billing.METHOD_CARD)
-        elif ph in link_phones:
-            billing.set_method(zakupka_id, b["buyer_name"], billing.METHOD_LINK)
-    db.close()
+    for it in inv:
+        if it["phone"] in card_phones:
+            billing.set_method(zakupka_id, it["buyer"], billing.METHOD_CARD)
+            it["method"] = billing.METHOD_CARD
+        elif it["phone"] in link_phones:
+            billing.set_method(zakupka_id, it["buyer"], billing.METHOD_LINK)
+            it["method"] = billing.METHOD_LINK
 
     try:
-        res, n = _push_invoices(zakupka_id, links=links, clear_links=card_phones)
+        res, n = _push_invoices(zakupka_id, links=links, clear_links=card_phones, inv=inv)
     except Exception as e:
         return _back(f"Ошибка записи в лист: {e}")
     msg = (f"Счета отправлены в витрину: {n}. Ссылок внесено: {len(links)}"
@@ -536,7 +555,7 @@ def pay_push(zakupka_id: int):
         if res.get("not_found"):
             msg += f" Не нашлись в листе: {len(res['not_found'])}."
     except Exception as e:
-        msg = f"Ошибка записи в лист: {e}"
+        msg = str(e) if "витрин" in str(e) else f"Ошибка записи в лист: {e}"
     return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}#oplata", status_code=303)
 
 
