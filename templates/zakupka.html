@@ -63,6 +63,31 @@
 
 }
 
+/* ---------- Оплата: оперативка ---------- */
+.op-sum{ font-size:.95rem; margin-bottom:8px; }
+.op-chips{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+.dv-chip{ flex:0 0 auto; border:1px solid #d0d5dd; background:#fff; border-radius:999px; padding:5px 11px; font-size:.85rem; }
+.dv-chip.active{ background:#344054; border-color:#344054; color:#fff; }
+.op-actions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+.op-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:8px; }
+.op-card{ background:#fff; border:1px solid #e6e8ec; border-left:4px solid #0ea5e9; border-radius:12px; padding:10px 12px; }
+.op-card.is-paid{ border-left-color:#16a34a; background:#f3fbf5; }
+.op-top{ display:flex; align-items:baseline; gap:8px; }
+.op-name{ flex:1 1 auto; font-weight:700; min-width:0; }
+.op-total{ white-space:nowrap; font-size:1.05rem; }
+.op-sub{ font-size:.8rem; color:#667085; margin-top:2px; }
+.op-bottom{ display:flex; align-items:center; gap:8px; margin-top:8px; }
+.op-m{ font-size:.78rem; border-radius:999px; padding:2px 8px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.op-m-link{ background:#eef4ff; color:#1d4ed8; }
+.op-m-card{ background:#fff4e5; color:#b45309; }
+.op-check{ margin-left:auto; display:flex; align-items:center; gap:6px; font-size:.9rem; white-space:nowrap; }
+.op-check input{ width:22px; height:22px; }
+.st-row{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; padding:8px 0; border-top:1px solid #eef0f3; }
+.st-name{ flex:1 1 180px; min-width:0; }
+.st-payto{ flex:1 1 180px; max-width:260px; }
+.st-fee{ display:flex; align-items:center; gap:4px; font-size:.8rem; color:#667085; }
+.st-fee input{ width:80px; }
+
 /* ---------- Имя: крупно, телефон мелко серым ---------- */
 .who-phone{ color:#9aa3ad; font-size:.78em; font-weight:400; white-space:nowrap; }
 
@@ -437,233 +462,148 @@
     </div>
 
     <!-- Вкладка ОПЛАТА -->
+    <!-- Вкладка ОПЛАТА: только оперативка — кто оплатил, кто нет -->
+    {% set pay = buyers_summary|selectattr('1.sum_zakupka')|list %}
+    {% set paid_list = pay|selectattr('1.payment_zakupka', 'equalto', 1)|list %}
     <div class="tab-pane fade" id="oplata" role="tabpanel">
         {% if paymsg %}<div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ paymsg }}</div>{% endif %}
         <div class="card shadow-sm mb-3">
-          <div class="card-body d-flex flex-wrap gap-2 align-items-center">
-            <a class="btn btn-outline-success btn-sm" href="/zakupka/{{ zakupka.id }}/pay-export">
-              <i class="bi bi-file-earmark-excel"></i> Выгрузить для оплаты (Excel)
-            </a>
-            <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-import" enctype="multipart/form-data"
-                  class="d-flex align-items-center gap-2 m-0">
-              <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm" style="max-width:210px" required>
-              <button class="btn btn-outline-primary btn-sm" type="submit"><i class="bi bi-upload"></i> Загрузить ссылки</button>
-            </form>
-            {% if is_admin(request) %}
-            <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-push" class="m-0">
-              <button class="btn btn-outline-secondary btn-sm" type="submit" title="Суммы, доставка и отметки оплаты — без файла, ссылки не трогаются">
-                <i class="bi bi-arrow-up-circle"></i> Обновить суммы в витрине
-              </button>
-            </form>
-            {% endif %}
-            <details class="text-muted small w-100">
-              <summary>Как это работает</summary>
-              Выгрузи → в файле сверху те, кто платит <b>по ссылке</b>, ниже — <b>на карту</b> (строку можно перенести вниз руками).
-              Поставщик впишет ссылки → загрузи обратно: девочки увидят в витрине закупку, доставку и итог.
-              Галочка «Оплата закупки» — только за реальную оплату: она сразу показывает в витрине «Оплачено ✓».
-              Доставку можно вписать руками (пусто — цена Яндекса), у «на карту» — куда переводить.
-              Способ оплаты, доставка и реквизиты уходят девочке сразу. Кнопка «Обновить суммы в витрине» —
-              чтобы разом пересчитать всем (например, после черновиков доставки или обновления состава).
-            </details>
+          <div class="card-body">
+            <div class="op-sum">
+              Оплачено <b id="op-n">{{ paid_list|length }}</b> из {{ pay|length }}
+              · <b id="op-rub">{{ '{:,}'.format(paid_list|map(attribute='1.bill_total')|sum).replace(',', ' ') }}</b>
+              из {{ '{:,}'.format(pay|map(attribute='1.bill_total')|sum).replace(',', ' ') }} ₽
+            </div>
+            <div class="op-chips">
+              <button type="button" class="dv-chip active" data-f="all">Все <b>{{ pay|length }}</b></button>
+              <button type="button" class="dv-chip op-wait" data-f="unpaid">💳 ждут <b id="op-c-unpaid">{{ pay|length - paid_list|length }}</b></button>
+              <button type="button" class="dv-chip" data-f="link">🔗 по ссылке <b>{{ pay|selectattr('1.method', 'equalto', 'link')|list|length }}</b></button>
+              <button type="button" class="dv-chip" data-f="card">🏦 на карту <b>{{ pay|selectattr('1.method', 'equalto', 'card')|list|length }}</b></button>
+              <button type="button" class="dv-chip op-okc" data-f="paid">✅ <b id="op-c-paid">{{ paid_list|length }}</b></button>
+            </div>
+            <div class="op-actions">
+              <a class="btn btn-outline-success btn-sm" href="/zakupka/{{ zakupka.id }}/pay-export"
+                 title="Сверху — кто платит по ссылке (впишите ссылки), ниже — на карту"><i class="bi bi-file-earmark-excel"></i> Excel для ссылок</a>
+              <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-import" enctype="multipart/form-data" class="m-0 op-upload">
+                <label class="btn btn-outline-primary btn-sm m-0"><i class="bi bi-upload"></i> Загрузить ссылки
+                  <input type="file" name="file" accept=".xlsx" hidden onchange="this.form.submit()"></label>
+              </form>
+              {% if is_admin(request) %}
+              <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-push" class="m-0">
+                <button class="btn btn-outline-secondary btn-sm" type="submit"
+                        title="Разом пересчитать всем суммы, доставку и отметки в витрине"><i class="bi bi-arrow-repeat"></i> Обновить витрину</button>
+              </form>
+              {% endif %}
+            </div>
           </div>
         </div>
-        <div class="card shadow-sm mb-3">
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <strong>Оплата закупки:</strong>
-                        <div class="progress">
-                            <div class="progress-bar bg-success" role="progressbar"
-                                 style="width: {{ payment_zakupka_percent }}%">
-                                {{ paid_zakupka }} / {{ total_buyers }}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <strong>Отправлено:</strong>
-                        <div class="progress">
-                            <div class="progress-bar bg-info" role="progressbar"
-                                 style="width: {{ shipped_percent }}%">
-                                {{ shipped_count }} / {{ total_buyers }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+
+        <div class="op-list">
+          {% for buyer_name, data in pay|sort(attribute='1.payment_zakupka') %}
+          <div class="op-card {{ 'is-paid' if data.payment_zakupka == 1 }}" data-method="{{ data.method }}" data-buyer="{{ buyer_name }}"
+               data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}" data-total="{{ data.bill_total }}">
+            <div class="op-top">
+              <span class="op-name">{{ who(buyer_name) }}</span>
+              <span class="op-total"><b class="bill-total" data-buyer="{{ buyer_name }}">{{ '{:,}'.format(data.bill_total).replace(',', ' ') }}</b> ₽</span>
             </div>
-        </div>
-
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <!-- ДЕСКТОП: таблица (как было) -->
-                <div class="d-none d-md-block">
-                <div class="d-flex flex-wrap gap-2 align-items-center mb-3 tab-toolbar" data-scope="oplata">
-                    <input type="search" class="form-control form-control-sm tab-search" style="max-width:240px"
-                           placeholder="🔍 Фамилия…">
-                    <div class="btn-group btn-group-sm tab-filters" role="group">
-                        <button type="button" class="btn btn-outline-secondary active" data-filter="all">Все</button>
-                        <button type="button" class="btn btn-outline-warning" data-filter="unpaid">Не оплачена</button>
-                        <button type="button" class="btn btn-outline-success" data-filter="paid">Оплачена</button>
-                        <button type="button" class="btn btn-outline-info" data-filter="shipped">Отправлено</button>
-                        <button type="button" class="btn btn-outline-secondary" data-filter="unshipped">Не отправлено</button>
-                    </div>
-                    <span class="text-muted small tab-count ms-auto"></span>
-                </div>
-
-                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Покупатель</th>
-                                <th>Сумма закупки</th>
-                                <th>Доставка</th>
-                                <th>Итого</th>
-                                <th>Способ</th>
-                                <th>Оплата закупки</th>
-                                <th>Сумма наличия</th>
-                                <th>Оплата наличия</th>
-                                <th>Отправлено</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for buyer_name, data in buyers_summary %}
-                            <tr data-search="{{ buyer_name|lower }}"
-                                data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}"
-                                data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
-                                <td><strong>{{ who(buyer_name) }}</strong></td>
-                                <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
-                                <td>
-                                    {% if data.sum_zakupka > 0 and not is_admin(request) %}{{ data.delivery or '—' }}
-                                    {% elif data.sum_zakupka > 0 %}
-                                    <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
-                                           style="width:84px" data-buyer="{{ buyer_name }}"
-                                           value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
-                                           placeholder="{{ data.delivery_auto if data.delivery_auto else '—' }}"
-                                           title="Пусто — цена черновика Яндекса{% if data.delivery_auto %} ({{ data.delivery_auto }} ₽){% endif %}. Впиши сумму — будет она.">
-                                    {% else %}—{% endif %}
-                                </td>
-                                <td><strong class="bill-total" data-buyer="{{ buyer_name }}">{{ data.bill_total if data.bill_total else "—" }}</strong></td>
-                                <td style="min-width:180px">
-                                    {% if data.sum_zakupka > 0 and not is_admin(request) %}
-                                    <span class="badge {{ 'bg-warning text-dark' if data.method == 'card' else 'bg-primary' }}">{{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}</span>
-                                    {% if data.method == 'card' and data.payto %}<div class="small text-muted mt-1">{{ data.payto }}</div>{% endif %}
-                                    {% elif data.sum_zakupka > 0 %}
-                                    <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
-                                            data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
-                                        {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
-                                    </button>
-                                    <input type="text" class="form-control form-control-sm bill-payto mt-1" data-buyer="{{ buyer_name }}"
-                                           value="{{ data.payto }}" placeholder="куда: +7913… Яндекс"
-                                           {% if data.method != 'card' %}hidden{% endif %}>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if data.sum_zakupka > 0 %}
-                                    <input type="checkbox" {{ '' if is_admin(request) else 'disabled' }}
-                                           class="status-checkbox payment-zakupka-checkbox"
-                                           data-buyer="{{ buyer_name }}"
-                                           {% if data.payment_zakupka == 1 %}checked{% endif %}>
-                                    {% else %}
-                                    —
-                                    {% endif %}
-                                </td>
-                                <td>{{ "%.0f"|format(data.sum_nalichie) if data.sum_nalichie else "—" }}</td>
-                                <td>
-                                    {% if data.sum_nalichie > 0 %}
-                                    <input type="checkbox" {{ '' if is_admin(request) else 'disabled' }}
-                                           class="status-checkbox payment-nalichie-checkbox"
-                                           data-buyer="{{ buyer_name }}"
-                                           {% if data.payment_nalichie == 1 %}checked{% endif %}>
-                                    {% else %}
-                                    —
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <input type="checkbox"
-                                           class="status-checkbox shipped-checkbox"
-                                           data-buyer="{{ buyer_name }}"
-                                           {% if data.shipped == 1 %}checked{% endif %}>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                </div>
-
-                <!-- ТЕЛЕФОН: карточки по покупателю (суммы + статусы) -->
-                <div class="d-md-none m-paywrap">
-                    <div class="m-toolbar">
-                        <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Фамилия…">
-                        <div class="m-chips">
-                            <button type="button" class="m-chip active" data-filter="all">Все</button>
-                            <button type="button" class="m-chip" data-filter="unpaid">Не оплачена</button>
-                            <button type="button" class="m-chip" data-filter="paid">Оплачена</button>
-                            <button type="button" class="m-chip" data-filter="shipped">Отправлено</button>
-                            <button type="button" class="m-chip" data-filter="unshipped">Не отправлено</button>
-                        </div>
-                        <div class="m-count small text-muted"></div>
-                    </div>
-                    {% for buyer_name, data in buyers_summary %}
-                    <div class="m-pay" data-search="{{ buyer_name|lower }}"
-                         data-paid="{{ 'yes' if data.payment_zakupka == 1 else 'no' }}"
-                         data-shipped="{{ 'yes' if data.shipped == 1 else 'no' }}">
-                        <div class="m-pay-top">
-                            <span class="m-dot"></span>
-                            <span class="m-title">{{ who(buyer_name) }}</span>
-                            <span class="m-pay-sum">{{ "%.0f"|format((data.sum_zakupka or 0) + (data.sum_nalichie or 0)) }} ₽</span>
-                        </div>
-                        <div class="m-pay-rows">
-                            {% if data.sum_zakupka and data.sum_zakupka > 0 %}
-                            {% if not is_admin(request) %}
-                            <div class="m-pay-row">
-                                <span>Доставка {{ data.delivery or '—' }} · итого <b>{{ data.bill_total }}</b> ₽</span>
-                                <span class="badge {{ 'bg-warning text-dark' if data.method == 'card' else 'bg-primary' }}" style="flex:0 0 auto">{{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}</span>
-                            </div>
-                            {% else %}
-                            <div class="m-pay-row">
-                                <span>Доставка, ₽</span>
-                                <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
-                                       style="width:90px" data-buyer="{{ buyer_name }}"
-                                       value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
-                                       placeholder="{{ data.delivery_auto if data.delivery_auto else '—' }}">
-                            </div>
-                            <div class="m-pay-row">
-                                <span>Итого <b class="bill-total" data-buyer="{{ buyer_name }}">{{ data.bill_total }}</b> ₽</span>
-                                <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
-                                        data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
-                                    {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
-                                </button>
-                            </div>
-                            <div class="m-pay-row"{% if data.method != 'card' %} hidden{% endif %}>
-                                <input type="text" class="form-control form-control-sm bill-payto" data-buyer="{{ buyer_name }}"
-                                       value="{{ data.payto }}" placeholder="куда переводить: +7913… Яндекс">
-                            </div>
-                            {% endif %}
-                            <label class="m-pay-row">
-                                <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
-                                <input type="checkbox" class="m-paycheck" data-paykind="payment-zakupka" {{ '' if is_admin(request) else 'disabled' }}
-                                       data-buyer="{{ buyer_name }}" {% if data.payment_zakupka == 1 %}checked{% endif %}>
-                            </label>
-                            {% endif %}
-                            {% if data.sum_nalichie and data.sum_nalichie > 0 %}
-                            <label class="m-pay-row">
-                                <span>Наличие · {{ "%.0f"|format(data.sum_nalichie) }} ₽</span>
-                                <input type="checkbox" class="m-paycheck" data-paykind="payment-nalichie" {{ '' if is_admin(request) else 'disabled' }}
-                                       data-buyer="{{ buyer_name }}" {% if data.payment_nalichie == 1 %}checked{% endif %}>
-                            </label>
-                            {% endif %}
-                            <label class="m-pay-row">
-                                <span>Отправлено</span>
-                                <input type="checkbox" class="m-paycheck" data-paykind="shipped"
-                                       data-buyer="{{ buyer_name }}" {% if data.shipped == 1 %}checked{% endif %}>
-                            </label>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
+            <div class="op-sub">
+              заказ {{ '{:,}'.format(data.sum_zakupka|round|int).replace(',', ' ') }}{% if data.delivery %} + доставка {{ data.delivery }}{% endif %}
             </div>
+            <div class="op-bottom">
+              {% if data.method == 'card' %}<span class="op-m op-m-card">🏦 на карту{% if data.payto %} · {{ data.payto }}{% endif %}</span>
+              {% else %}<span class="op-m op-m-link">🔗 по ссылке</span>{% endif %}
+              <label class="op-check">
+                <input type="checkbox" class="status-checkbox payment-zakupka-checkbox" data-buyer="{{ buyer_name }}"
+                       {{ 'checked' if data.payment_zakupka == 1 }} {{ '' if is_admin(request) else 'disabled' }}>
+                оплачено
+              </label>
+            </div>
+          </div>
+          {% endfor %}
         </div>
+        {% if is_admin(request) %}
+        <div class="small text-muted mt-2">Способ оплаты, реквизиты и доставку вручную — во вкладке «⚙️ Настройки».</div>
+        {% endif %}
     </div>
+
+    {% if has_nalichie %}
+    <!-- Вкладка НАЛИЧИЕ: отдельный логический блок (переделаем под «заказ вне закупки») -->
+    <div class="tab-pane fade" id="nalichie" role="tabpanel">
+        <div class="card shadow-sm"><div class="card-body">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Покупатель</th><th>Сумма наличия</th><th>Оплачено</th></tr></thead>
+            <tbody>
+            {% for buyer_name, data in buyers_summary if (data.sum_nalichie or 0) > 0 %}
+            <tr><td>{{ who(buyer_name) }}</td><td>{{ "%.0f"|format(data.sum_nalichie) }} ₽</td>
+                <td><input type="checkbox" class="status-checkbox payment-nalichie-checkbox" data-buyer="{{ buyer_name }}"
+                           {{ 'checked' if data.payment_nalichie == 1 }} {{ '' if is_admin(request) else 'disabled' }}></td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div></div>
+    </div>
+    {% endif %}
+
+    {% if is_admin(request) %}
+    <!-- Вкладка НАСТРОЙКИ: то, что задаётся один раз -->
+    <div class="tab-pane fade" id="nastroyki" role="tabpanel">
+        <div class="card shadow-sm mb-3"><div class="card-body">
+          <h6 class="mb-2">💳 Оплата</h6>
+          <label class="form-label small text-muted mb-1">Реквизиты для всех, кто платит на карту</label>
+          <input type="text" class="form-control form-control-sm mb-1" id="payto-default" value="{{ payto_default }}"
+                 placeholder="например: +7 900 000-00-00 Сбер" style="max-width:360px">
+          <div class="small text-muted mb-3">Уходят в витрину всем с 🏦. У конкретной девочки можно вписать свои — ниже.</div>
+
+          <div class="st-list">
+            {% for buyer_name, data in pay %}
+            <div class="st-row">
+              <span class="st-name">{{ who(buyer_name) }}</span>
+              <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
+                      data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
+                {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}</button>
+              <input type="text" class="form-control form-control-sm bill-payto st-payto" data-buyer="{{ buyer_name }}"
+                     value="{{ data.payto_own }}" placeholder="{{ payto_default or 'реквизиты' }}"
+                     title="Пусто — общие реквизиты" {% if data.method != 'card' %}hidden{% endif %}>
+              <label class="st-fee">доставка
+                <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee" data-buyer="{{ buyer_name }}"
+                       value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
+                       placeholder="{{ data.delivery_auto if data.delivery_auto else '—' }}"
+                       title="Пусто — цена черновика Яндекса. Впиши сумму — будет она."> ₽</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="small text-muted mt-2">Всё сохраняется сразу и уходит девочке в витрину.</div>
+        </div></div>
+
+        <div class="card shadow-sm mb-3"><div class="card-body">
+          <h6 class="mb-2">🚚 Доставка</h6>
+          <div class="small mb-2">ПВЗ отправления:
+            {% if settings_info.origin_yandex %}<div>Яндекс — {{ settings_info.origin_yandex }}</div>{% endif %}
+            {% if settings_info.origin_cdek %}<div>СДЭК — {{ settings_info.origin_cdek }}</div>{% endif %}
+            {% if not settings_info.origin_yandex and not settings_info.origin_cdek %}<div class="text-danger">не задан</div>{% endif %}
+            <a href="/dostavka">изменить →</a>
+          </div>
+          <div class="small mb-3">Доставку оплачивает: Яндекс —
+            {{ 'покупатель на ПВЗ' if settings_info.paid_by_yandex == 'recipient' else 'мы, покупателю строкой в счёте' }};
+            СДЭК — {{ 'покупатель на ПВЗ' if settings_info.paid_by_cdek == 'recipient' else 'мы' }}.</div>
+          {% if settings_info.pieces %}
+          <form method="POST" action="/dostavka/zakupka/{{ zakupka.id }}/piece-weight">
+            <input type="hidden" name="back" value="settings">
+            <div class="small fw-semibold mb-1">⚖️ Вес 1 бутылки базы, г</div>
+            {% for p in settings_info.pieces %}
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <input type="hidden" name="name" value="{{ p.name }}">
+              <span class="small flex-grow-1">{{ p.name }} <span class="text-muted">· {{ p.count }} шт</span></span>
+              <input type="text" inputmode="numeric" name="grams" class="form-control form-control-sm" style="width:90px"
+                     value="{{ p.manual or '' }}" placeholder="{{ p.auto }}">
+            </div>
+            {% endfor %}
+            <button class="btn btn-sm btn-outline-primary mt-1" type="submit">Сохранить вес</button>
+          </form>
+          {% endif %}
+        </div></div>
+    </div>
+    {% endif %}
 
     {% if is_admin(request) %}
     <!-- Вкладка СОСТАВ: редактирование позиций прямо в базе (статусы не трогаем) -->
@@ -1076,6 +1016,67 @@ function initTabToolbars() {
         applyTab(scope);
     });
 }
+
+// === Оплата: фильтры-чипы и счётчики (галочку «оплачено» сохраняет общий обработчик) ===
+(function () {
+    const pane = document.getElementById('oplata');
+    if (!pane) return;
+    const cards = () => Array.from(pane.querySelectorAll('.op-card'));
+    const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    function apply() {
+        const f = (pane.querySelector('.dv-chip.active') || {}).dataset ? pane.querySelector('.dv-chip.active').dataset.f : 'all';
+        cards().forEach(c => {
+            const paid = c.dataset.paid === 'yes';
+            c.hidden = !(f === 'all' || (f === 'paid' && paid) || (f === 'unpaid' && !paid) ||
+                         (f === 'link' && c.dataset.method === 'link') || (f === 'card' && c.dataset.method === 'card'));
+        });
+    }
+    function recount() {
+        const all = cards(), paid = all.filter(c => c.dataset.paid === 'yes');
+        document.getElementById('op-n').textContent = paid.length;
+        document.getElementById('op-c-paid').textContent = paid.length;
+        document.getElementById('op-c-unpaid').textContent = all.length - paid.length;
+        document.getElementById('op-rub').textContent = fmt(paid.reduce((s, c) => s + (+c.dataset.total || 0), 0));
+    }
+    pane.querySelectorAll('.dv-chip').forEach(ch => ch.addEventListener('click', () => {
+        pane.querySelectorAll('.dv-chip').forEach(x => x.classList.remove('active'));
+        ch.classList.add('active'); apply();
+    }));
+    pane.querySelectorAll('.payment-zakupka-checkbox').forEach(cb => cb.addEventListener('change', () => {
+        const c = cb.closest('.op-card');
+        c.dataset.paid = cb.checked ? 'yes' : 'no';
+        c.classList.toggle('is-paid', cb.checked);
+        recount(); apply();
+        setTimeout(() => {                       // если сервер не принял — общий обработчик вернёт галочку
+            c.dataset.paid = cb.checked ? 'yes' : 'no'; c.classList.toggle('is-paid', cb.checked); recount();
+        }, 2000);
+    }));
+    // сменили способ в «Настройках» — карточка на «Оплате» следом
+    document.addEventListener('click', e => {
+        const b = e.target.closest('.paymethod-btn'); if (!b) return;
+        setTimeout(() => {
+            const c = cards().find(x => x.dataset.buyer === b.dataset.buyer); if (!c) return;
+            const card = b.dataset.method === 'card';
+            c.dataset.method = b.dataset.method;
+            const m = c.querySelector('.op-m');
+            m.className = 'op-m ' + (card ? 'op-m-card' : 'op-m-link');
+            const pt = (document.querySelector('.st-payto[data-buyer="' + CSS.escape(b.dataset.buyer) + '"]') || {}).value
+                       || (document.getElementById('payto-default') || {}).value || '';
+            m.textContent = card ? '🏦 на карту' + (pt ? ' · ' + pt : '') : '🔗 по ссылке';
+        }, 900);
+    });
+    // общие реквизиты «для всех на карту»
+    const def = document.getElementById('payto-default');
+    if (def) def.addEventListener('change', async function () {
+        const fd = new FormData(); fd.append('buyer', ''); fd.append('field', 'payto_default'); fd.append('value', def.value);
+        try {
+            const j = await (await fetch('/api/billing/{{ zakupka.id }}', { method: 'POST', body: fd })).json();
+            def.classList.add(j.ok ? 'is-valid' : 'is-invalid');
+            setTimeout(() => def.classList.remove('is-valid'), 1200);
+            document.querySelectorAll('.st-payto').forEach(i => { i.placeholder = def.value || 'реквизиты'; });
+        } catch (e) { def.classList.add('is-invalid'); }
+    });
+})();
 
 // после выгрузки/загрузки счетов возвращаемся сразу на вкладку «Оплата»
 (function () {

@@ -49,9 +49,26 @@ def set_fee(zakupka_id, buyer_name, value):
     set_setting(fee_key(zakupka_id, buyer_name), (value or "").strip())
 
 
-def get_payto(zakupka_id, buyer_name):
-    """Куда переводить (для оплаты на карту), напр. «+79131967569 Яндекс»."""
+PAYTO_DEFAULT_KEY = "payto_default"
+
+
+def get_payto_default():
+    """Реквизиты «для всех, кто на карту» — вписываются один раз в Настройках."""
+    return get_setting(PAYTO_DEFAULT_KEY, "").strip()
+
+
+def set_payto_default(value):
+    set_setting(PAYTO_DEFAULT_KEY, (value or "").strip())
+
+
+def get_payto_own(zakupka_id, buyer_name):
+    """Реквизиты, вписанные именно этой девочке (без подстановки общих)."""
     return get_setting(payto_key(zakupka_id, buyer_name), "").strip()
+
+
+def get_payto(zakupka_id, buyer_name):
+    """Куда переводить (для оплаты на карту): свои реквизиты девочки или общие."""
+    return get_payto_own(zakupka_id, buyer_name) or get_payto_default()
 
 
 def set_payto(zakupka_id, buyer_name, value):
@@ -72,6 +89,7 @@ def _bill(zakupka_id, buyer, phone, goods, paid, deliv):
         "total": goods + d_rub,
         "method": get_method(zakupka_id, buyer),
         "payto": get_payto(zakupka_id, buyer),
+        "payto_own": get_payto_own(zakupka_id, buyer),
         "paid": paid,
     }
 

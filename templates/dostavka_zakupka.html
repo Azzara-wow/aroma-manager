@@ -36,6 +36,7 @@
 .dv-box{ width:auto; max-width:140px; font-size:.8rem; }
 .dv-pick{ margin-left:auto; font-size:.85rem; display:flex; align-items:center; gap:5px; }
 .dv-pick.off{ color:#98a2b3; }
+.dv-sent{ font-size:.85rem; display:flex; align-items:center; gap:5px; color:#475467; }
 .dv-chip.dv-ship.active{ background:#16a34a; border-color:#16a34a; }
 .dv-chip.dv-pour.active{ background:#f59e0b; border-color:#f59e0b; }
 .dv-chip.dv-pack.active{ background:#7c3aed; border-color:#7c3aed; }
@@ -57,7 +58,7 @@
 <div class="text-muted small mb-3 d-none d-md-block">
   Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
   Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
-  {% if is_admin(request) %}<a href="/dostavka" class="ms-2">Все получатели и ПВЗ отправления →</a>{% endif %}
+  {% if is_admin(request) %}<a href="/zakupka/{{ zakupka.id }}#nastroyki" class="ms-2">⚙️ Настройки доставки →</a>{% endif %}
 </div>
 
 {% if sheet_error %}
@@ -69,44 +70,10 @@
 <div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ msg }}</div>
 {% endif %}
 
-{% if piece_items %}
-<details class="card shadow-sm mb-3 d-none d-md-block">
-  <summary class="card-body py-2 small">⚖️ <b>Вес штучных товаров</b> (база едет бутылкой, не флаконами):
-    {% for p in piece_items %}{{ p.name }} — {{ p.manual or p.auto }} г{% if not loop.last %}; {% endif %}{% endfor %}</summary>
-  <form method="POST" action="/dostavka/zakupka/{{ zakupka.id }}/piece-weight" class="card-body pt-0">
-    <div class="small text-muted mb-2">Вес ОДНОЙ штуки с бутылкой, в граммах. Пусто — оценка по названию: 790 г на литр + бутылка (1 л ≈ 850 г, 0,5 л ≈ 435 г).</div>
-    {% for p in piece_items %}
-    <div class="d-flex align-items-center gap-2 mb-2">
-      <input type="hidden" name="name" value="{{ p.name }}">
-      <span class="small" style="min-width:220px">{{ p.name }} <span class="text-muted">· заказано {{ p.count }} шт</span></span>
-      <input type="text" inputmode="numeric" name="grams" class="form-control form-control-sm" style="width:100px"
-             value="{{ p.manual or '' }}" placeholder="{{ p.auto }}"> <span class="small">г</span>
-    </div>
-    {% endfor %}
-    <button class="btn btn-sm btn-outline-primary" type="submit">Сохранить вес</button>
-  </form>
-</details>
-{% endif %}
-
-<div class="small mb-2 d-none d-md-block">
-  Доставку оплачивает:
-  Яндекс —
-  {% if paid_by_yandex == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
-  {% else %}<span class="badge bg-secondary">мы, покупателю — строкой в счёте</span>{% endif %}
-  · СДЭК —
-  {% if paid_by_cdek == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
-  {% else %}<span class="badge bg-secondary">продавец</span>{% endif %}
-</div>
-
 {% if not origin_pvz_id and not origin_cdek_code %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
   Не задан <strong>ПВЗ отправления</strong> — задай его на странице
   <a href="/dostavka">«Доставки»</a> (для Яндекса и/или СДЭК), иначе создать заявки нельзя.</div>
-{% else %}
-<div class="text-muted small mb-2 d-none d-md-block"><i class="bi bi-geo-alt-fill"></i> Отправление —
-  {% if origin_pvz_address %}Яндекс: {{ origin_pvz_address }}{% endif %}
-  {% if origin_cdek_address %}{% if origin_pvz_address %} · {% endif %}СДЭК: {{ origin_cdek_address }}{% endif %}
-</div>
 {% endif %}
 
 <form method="POST">
@@ -188,6 +155,10 @@
           {% for b in supplier_boxes %}<option value="{{ b.code }}" {{ 'selected' if b.code == r.box else '' }}>{{ b.name }}</option>{% endfor %}
         </select>
         {% endif %}
+        <label class="dv-sent" title="Отдали перевозчику (для Почты/Озона — вручную)">
+          <input type="checkbox" class="form-check-input ship-check" data-buyer="{{ r.buyer_name }}"
+                 {{ 'checked' if r.ship.shipped }}> отправлено
+        </label>
         <label class="dv-pick {{ '' if r.ready else 'off' }}">
           <input type="checkbox" class="form-check-input dv-pickbox" data-phone="{{ r.phone }}"
                  {{ 'checked' if r.ready and key == 'ship' else '' }} {{ '' if r.ready else 'disabled' }}> выбрать
@@ -228,6 +199,7 @@
             <th>Вес, г</th>
             <th>Коробка</th>
             <th>Статус доставки</th>
+            <th>Отправлено</th>
           </tr>
         </thead>
         <tbody>
@@ -293,6 +265,8 @@
                 <span class="badge bg-secondary" title="{{ r.reason }}">{{ r.reason }}</span>
               {% endif %}
             </td>
+            <td><input type="checkbox" class="form-check-input ship-check" data-buyer="{{ r.buyer_name }}"
+                       {{ 'checked' if r.ship.shipped }}></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -355,5 +329,20 @@ document.querySelectorAll('.js-box').forEach(function (sel) {
   });
   count();
 })();
+</script>
+
+<script>
+document.addEventListener('change', async function (e) {
+  const cb = e.target.closest('.ship-check');
+  if (!cb) return;
+  const want = cb.checked, buyer = cb.dataset.buyer;
+  const fd = new FormData(); fd.append('zakupka_id', '{{ zakupka.id }}');
+  try {
+    const j = await (await fetch('/api/status/shipped/' + encodeURIComponent(buyer), { method: 'POST', body: fd })).json();
+    if (!j.ok) throw 0;
+    const val = !!j.new_value;
+    document.querySelectorAll('.ship-check').forEach(x => { if (x.dataset.buyer === buyer) x.checked = val; });
+  } catch (err) { cb.checked = !want; alert('Не сохранилось'); }
+});
 </script>
 {% endblock %}

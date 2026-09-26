@@ -499,6 +499,7 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
         data["bill_total"] = inv["total"] if inv else 0
         data["method"] = inv["method"] if inv else billing.METHOD_LINK
         data["payto"] = inv["payto"] if inv else ""
+        data["payto_own"] = inv["payto_own"] if inv else ""
 
     buyers_summary_sorted = sorted(buyers_summary.items(), key=lambda x: x[0])
 
@@ -540,6 +541,9 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             "payment_zakupka_percent": payment_zakupka_percent,
             "shipped_percent": shipped_percent,
             "paymsg": paymsg,
+            "has_nalichie": any((d.get("sum_nalichie") or 0) > 0 for _, d in buyers_summary_sorted),
+            "payto_default": billing.get_payto_default(),
+            "settings_info": _settings_info(zakupka_id),
         }
     )
 
@@ -626,6 +630,13 @@ def _sheet_fields(it):
             "paid": buyers_sheet.PAID_MARK if it["paid"] else "",
             # реквизиты перевода — только тем, кто платит на карту
             "payto": it["payto"] if it["method"] == billing.METHOD_CARD else ""}
+
+
+def _push_invoices_quiet(zakupka_id):
+    try:
+        _push_invoices(zakupka_id)
+    except Exception as e:
+        print(f"[счета→витрина] {e}")
 
 
 def _push_one(zakupka_id, buyer):
@@ -773,6 +784,10 @@ def api_billing(zakupka_id: int, background: BackgroundTasks, buyer: str = Form(
         billing.set_fee(zakupka_id, buyer, v)
     elif field == "payto":
         billing.set_payto(zakupka_id, buyer, v)
+    elif field == "payto_default":
+        billing.set_payto_default(v)
+        background.add_task(_push_invoices_quiet, zakupka_id)
+        return {"ok": True}
     else:
         return JSONResponse({"ok": False, "error": "unknown field"})
     db = get_db()
@@ -1505,7 +1520,7 @@ def _pline(it):
 
 @app.post("/dostavka/zakupka/{zakupka_id}/piece-weight")
 def dostavka_piece_weight(zakupka_id: int, name: List[str] = Form(default=[]),
-                          grams: List[str] = Form(default=[])):
+                          grams: List[str] = Form(default=[]), back: str = Form("")):
     """Вес 1 шт штучных товаров (База, ММБ). Пусто — оценка по названию."""
     from urllib.parse import quote
     import piece
@@ -1516,8 +1531,31 @@ def dostavka_piece_weight(zakupka_id: int, name: List[str] = Form(default=[]),
             continue
         piece.set_weight(n, g)
         saved += 1
+    if back == "settings":
+        return RedirectResponse(url=f"/zakupka/{zakupka_id}#nastroyki", status_code=303)
     return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(f'Вес штучных сохранён: {saved}')}",
                             status_code=303)
+
+
+def _settings_info(zakupka_id):
+    """Настроечное для вкладки «Настройки»: откуда отправляем, кто платит доставку, вес базы."""
+    import carriers
+    import piece
+    db = get_db()
+    pieces = [{"name": r["aroma_name"], "count": r["n"], "manual": piece.manual_weight(r["aroma_name"]),
+               "auto": piece.default_weight_g(r["aroma_name"])}
+              for r in db.execute(
+                  "SELECT aroma_name, SUM(volume_ml) AS n FROM zakaz_items "
+                  "WHERE zakupka_id = ? AND COALESCE(is_piece, 0) = 1 GROUP BY aroma_name ORDER BY aroma_name",
+                  (zakupka_id,)).fetchall()]
+    db.close()
+    return {
+        "origin_yandex": get_setting("origin_pvz_address", ""),
+        "origin_cdek": get_setting("origin_cdek_address", ""),
+        "paid_by_yandex": carriers.paid_by(carrier="yandex"),
+        "paid_by_cdek": carriers.paid_by(carrier="cdek"),
+        "pieces": pieces,
+    }
 
 
 def _ship_readiness(db, zakupka_id):
@@ -1527,11 +1565,12 @@ def _ship_readiness(db, zakupka_id):
     for r in db.execute(
         "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 THEN 1 ELSE 0 END) AS pour, "
         "SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
-        "MAX(COALESCE(s.payment_zakupka,0)) AS paid "
+        "MAX(COALESCE(s.payment_zakupka,0)) AS paid, MAX(COALESCE(s.shipped,0)) AS shipped "
         "FROM zakaz_items zi LEFT JOIN statuses s ON s.zakaz_item_id = zi.id "
         "WHERE zi.zakupka_id = ? GROUP BY zi.buyer_name", (zakupka_id,),
     ).fetchall():
-        out[r["buyer_name"]] = {"pour": r["pour"] or 0, "pack": r["pack"] or 0, "paid": bool(r["paid"])}
+        out[r["buyer_name"]] = {"pour": r["pour"] or 0, "pack": r["pack"] or 0, "paid": bool(r["paid"]),
+                                "shipped": bool(r["shipped"])}
     for r in db.execute(
         "SELECT no.buyer_name, SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
         "MAX(COALESCE(s.payment_nalichie,0)) AS paid "
@@ -1644,7 +1683,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
             "carrier_manual": (rec.get("carrier_manual") if rec else ""),
             "ship": readiness.get(buyer_name, {"ready": False, "wait": [], "pour": 0, "pack": 0,
-                                               "paid": False, "pour_list": []}),
+                                               "paid": False, "pour_list": [], "shipped": False}),
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,                         # выбранная коробка поставщика
@@ -1657,7 +1696,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         })
     for r in rows:
         sh, dl = r["ship"], r["delivery"] or {}
-        if dl.get("status") in ("confirmed", "labeled"):
+        if dl.get("status") in ("confirmed", "labeled") or sh.get("shipped"):
             r["stage"] = "sent"
         elif sh.get("pour"):
             r["stage"] = "pour"

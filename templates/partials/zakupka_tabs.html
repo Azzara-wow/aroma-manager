@@ -3,9 +3,10 @@
     Параметры: zakupka, current ('dostavka' на странице доставок, иначе пусто). -#}
 {% set on_dost = (current == 'dostavka') %}
 {% set tabs = [('rozliv', '🧪 Розлив'), ('otpravka', '📦 Упаковка'), ('dostavka', '🚚 Доставка'),
-               ('oplata', '💰 Оплата'), ('sostav', '✏️ Состав')] %}
+               ('oplata', '💰 Оплата'), ('nalichie', '🏬 Наличие'), ('sostav', '✏️ Состав'), ('nastroyki', '⚙️ Настройки')] %}
 <ul class="nav nav-tabs mb-3 zk-tabs" id="zakupkaTabs" role="tablist">
-    {% for key, label in tabs if key != 'sostav' or is_admin(request) %}
+    {% for key, label in tabs if (key not in ('sostav', 'nastroyki') or is_admin(request))
+                                 and (key != 'nalichie' or has_nalichie) %}
     <li class="nav-item" role="presentation">
         {% if key == 'dostavka' %}
             <a class="nav-link {{ 'active' if on_dost }}" href="/dostavka/zakupka/{{ zakupka.id }}">{{ label }}</a>

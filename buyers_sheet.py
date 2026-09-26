@@ -102,6 +102,23 @@ def _ws():
     return client.open_by_url(USERS_URL).worksheet(SHEET_NAME)
 
 
+class _ReadOnlyWS:
+    """Превью на компьютере (SHEET_WRITES=off): читаем настоящий лист, но НИЧЕГО в него не пишем —
+    галочки/способы/реквизиты в превью не доходят до девочек."""
+    def __init__(self, ws):
+        self._ws = ws
+
+    def __getattr__(self, name):
+        if name in ("update", "update_acell", "add_cols", "append_row", "append_rows", "batch_update"):
+            return lambda *a, **k: print(f"[превью] запись в лист пропущена: {name}")
+        return getattr(self._ws, name)
+
+
+if os.environ.get("SHEET_WRITES", "").lower() == "off":
+    _real_ws = _ws
+    _ws = lambda: _ReadOnlyWS(_real_ws())
+
+
 def normalize_phone(raw) -> str:
     """К канону: 11 цифр с ведущей 7 (как в aroma_web)."""
     digits = "".join(ch for ch in str(raw) if ch.isdigit())
