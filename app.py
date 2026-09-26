@@ -232,7 +232,8 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             zi.aroma_name,
             zi.volume_ml,
             'закупка' as source,
-            s.upakovka
+            s.upakovka,
+            s.rozliv
         FROM zakaz_items zi
         JOIN statuses s ON s.zakaz_item_id = zi.id
         WHERE zi.zakupka_id = ?
@@ -245,7 +246,8 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             no.aroma_name,
             no.volume_ml,
             'наличие' as source,
-            COALESCE(s.upakovka, 0) as upakovka
+            COALESCE(s.upakovka, 0) as upakovka,
+            1 as rozliv
         FROM nalichie_orders no
         LEFT JOIN statuses s ON s.nalichie_order_id = no.id
         WHERE no.zakupka_id = ? OR no.zakupka_id IS NULL
@@ -1323,6 +1325,40 @@ def dostavka_set_pvz(
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
+def _ship_readiness(db, zakupka_id):
+    """{buyer_name: {"ready": bool, "wait": [...]}} — можно ли отправлять: всё разлито,
+    всё упаковано (закупка + наличие), оплачено (закупка; наличие — если оно есть)."""
+    out = {}
+    for r in db.execute(
+        "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 THEN 1 ELSE 0 END) AS pour, "
+        "SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
+        "MAX(COALESCE(s.payment_zakupka,0)) AS paid "
+        "FROM zakaz_items zi LEFT JOIN statuses s ON s.zakaz_item_id = zi.id "
+        "WHERE zi.zakupka_id = ? GROUP BY zi.buyer_name", (zakupka_id,),
+    ).fetchall():
+        out[r["buyer_name"]] = {"pour": r["pour"] or 0, "pack": r["pack"] or 0, "paid": bool(r["paid"])}
+    for r in db.execute(
+        "SELECT no.buyer_name, SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
+        "MAX(COALESCE(s.payment_nalichie,0)) AS paid "
+        "FROM nalichie_orders no LEFT JOIN statuses s ON s.nalichie_order_id = no.id "
+        "WHERE no.zakupka_id = ? OR no.zakupka_id IS NULL GROUP BY no.buyer_name", (zakupka_id,),
+    ).fetchall():
+        d = out.setdefault(r["buyer_name"], {"pour": 0, "pack": 0, "paid": True})
+        d["pack"] += r["pack"] or 0
+        d["paid"] = d["paid"] and bool(r["paid"])
+    for d in out.values():
+        wait = []
+        if d["pour"]:
+            wait.append(f"розлив {d['pour']}")
+        if d["pack"]:
+            wait.append(f"упаковка {d['pack']}")
+        if not d["paid"]:
+            wait.append("оплата")
+        d["wait"] = wait
+        d["ready"] = not wait
+    return out
+
+
 def _delivery_block_reason(phone, rec):
     """Короткая причина, почему покупатель не готов к доставке (или '')."""
     if not phone:
@@ -1364,6 +1400,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         (zakupka_id,),
     ).fetchall():
         deliveries[d["phone"]] = row_to_dict(d)
+    readiness = _ship_readiness(db, zakupka_id)
     db.close()
 
     # получателей из листа читаем ОДИН раз, кладём в словарь по телефону
@@ -1400,6 +1437,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "pvz_address": rec["pvz_address"] if rec else "",
             "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
             "carrier_manual": (rec.get("carrier_manual") if rec else ""),
+            "ship": readiness.get(buyer_name, {"ready": False, "wait": []}),
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,                         # выбранная коробка поставщика

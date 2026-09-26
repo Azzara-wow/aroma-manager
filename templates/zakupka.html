@@ -121,6 +121,11 @@
 .m-group.g-part .m-dot{ background:#f5a623; }
 .m-title{ font-weight:600; flex:1 1 auto; word-break:break-word; }
 .m-meta{ color:#98a2b3; font-size:.78rem; flex:0 0 auto; white-space:nowrap; }
+.m-ready{ font-size:.72rem; font-weight:600; border-radius:999px; padding:1px 8px; white-space:nowrap; flex:0 0 auto; }
+.m-ready.ok{ color:#1e6b34; background:#e3f4e7; }
+.m-ready.wait{ color:#8a939c; background:#f2f4f7; font-weight:500; }
+.m-ready:empty{ display:none; }
+@media (max-width:575.98px){ #otpravka .m-meta{ display:none; } }  /* место под маячок; счёт виден в 0/2 */
 .m-badge{ font-size:.78rem; color:#3f6f43; background:#eef3ee; border-radius:999px;
           padding:1px 9px; flex:0 0 auto; }
 .m-chev{ color:#98a2b3; transition:transform .15s; flex:0 0 auto; }
@@ -382,6 +387,7 @@
                         <input type="search" class="form-control form-control-sm m-search" placeholder="🔍 Фамилия или аромат…">
                         <div class="m-chips">
                             <button type="button" class="m-chip active" data-filter="all">Все</button>
+                            <button type="button" class="m-chip" data-filter="ready">✓ Можно упаковать</button>
                             <button type="button" class="m-chip" data-filter="done">Упакованные</button>
                             <button type="button" class="m-chip" data-filter="partial">Частично</button>
                             <button type="button" class="m-chip" data-filter="todo">Не упакованные</button>
@@ -396,6 +402,7 @@
                         <button type="button" class="m-head">
                             <span class="m-dot"></span>
                             <span class="m-title">{{ who(buyer) }}</span>
+                            <span class="m-ready"></span>
                             <span class="m-meta">{{ gitems|length }} поз.</span>
                             <span class="m-badge">{{ gdone }}/{{ gitems|length }}</span>
                             <span class="m-chev">▾</span>
@@ -409,7 +416,7 @@
                                 </span>
                                 <span class="m-row-vol">{{ it.volume_ml }} мл</span>
                                 <input type="checkbox" class="m-check" data-kind="upakovka"
-                                       data-item-id="{{ it.id }}"
+                                       data-item-id="{{ it.id }}" data-rozliv="{{ it.rozliv or 0 }}"
                                        data-source="{% if it.source == 'закупка' %}zakupka{% else %}nalichie{% endif %}"
                                        {% if it.upakovka == 1 %}checked{% endif %}>
                             </label>
@@ -823,6 +830,28 @@ function mGroupState(g) {
     else if (done > 0) g.classList.add('g-part');
     const badge = g.querySelector('.m-badge');
     if (badge) badge.textContent = done + '/' + total;
+    packReady(g);
+}
+// Упаковка: маячок «всё разлито — можно упаковать» / «ждёт розлива: N»
+function packReady(g) {
+    const pill = g.querySelector('.m-ready');
+    if (!pill) return;                               // не карточка упаковки
+    const checks = g.querySelectorAll('.m-check');
+    const waiting = [].filter.call(checks, function (c) { return c.dataset.rozliv === '0'; }).length;
+    const done = [].filter.call(checks, function (c) { return c.checked; }).length;
+    const allPacked = checks.length > 0 && done >= checks.length;
+    g.dataset.ready = (!allPacked && waiting === 0) ? '1' : '0';
+    pill.className = 'm-ready' + (allPacked ? '' : (waiting ? ' wait' : ' ok'));
+    pill.textContent = allPacked ? '' : (waiting ? 'ждёт розлива: ' + waiting : '✓ можно упаковать');
+}
+// отметили розлив → обновляем маячок у этой девочки на «Упаковке»
+function syncPour(itemId, poured) {
+    const c = document.querySelector('#otpravka .m-check[data-kind="upakovka"][data-source="zakupka"][data-item-id="' + itemId + '"]');
+    if (!c) return;
+    c.dataset.rozliv = poured ? '1' : '0';
+    const g = c.closest('.m-group');
+    packReady(g);
+    const wrap = g.closest('.m-wrap'); if (wrap) mApply(wrap);
 }
 function mRecount(g) {
     const checks = g.querySelectorAll('.m-check');
@@ -842,6 +871,7 @@ function mApply(wrap) {
         if (filter === 'done') okF = (total > 0 && done >= total);
         else if (filter === 'todo') okF = (done === 0);
         else if (filter === 'partial') okF = (done > 0 && done < total);
+        else if (filter === 'ready') okF = (g.dataset.ready === '1');
         const okT = !q || (g.dataset.search || '').indexOf(q) !== -1;
         const vis = okF && okT;
         g.style.display = vis ? '' : 'none';
@@ -873,6 +903,7 @@ async function mToggle(cb) {
         if (twin) { twin.checked = cb.checked; const tr = twin.closest('tr'); if (tr) tr.classList.toggle('table-row-done', cb.checked); }
         mRecount(cb.closest('.m-group'));
         const wrap = cb.closest('.m-wrap'); if (wrap) mApply(wrap);
+        if (kind === 'rozliv') syncPour(id, cb.checked);
         refreshAllProgressBars();
     } catch (e) { cb.checked = !want; alert('Сетевая ошибка'); }
     finally { cb.disabled = false; }
