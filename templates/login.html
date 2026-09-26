@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Вход — Менеджер закупок Luzi</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background:#f6f4ef; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+        .box { width:100%; max-width:360px; background:#fff; border-radius:14px; padding:28px 24px;
+               box-shadow:0 6px 24px rgba(0,0,0,.07); }
+        h1 { font-size:1.25rem; margin:0 0 18px; color:#6f42c1; }
+        .form-control { padding:.65rem .8rem; font-size:16px; }
+        .btn { padding:.65rem; font-size:16px; }
+    </style>
+</head>
+<body>
+<form class="box" method="POST" action="{{ action or '/login' }}">
+    <h1>🌸 Менеджер закупок Luzi</h1>
+    {% if err %}<div class="alert alert-danger py-2 small">{{ err }}</div>{% endif %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="form-label small text-muted mb-1">Логин</label>
+    <input class="form-control mb-3" name="login" autocomplete="username" autocapitalize="none" required autofocus>
+    <label class="form-label small text-muted mb-1">Пароль</label>
+    <input class="form-control mb-4" name="password" type="password" autocomplete="current-password" required>
+    <button class="btn btn-primary w-100" type="submit" style="background:#6f42c1;border-color:#6f42c1">Войти</button>
+</form>
+</body>
+</html>

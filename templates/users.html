@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи — Менеджер закупок Luzi{% endblock %}
+
+{% block content %}
+<h2 class="mb-3"><i class="bi bi-person-lock"></i> Пользователи</h2>
+{% if msg %}<div class="alert alert-success small">{{ msg }}</div>{% endif %}
+{% if err %}<div class="alert alert-danger small">{{ err }}</div>{% endif %}
+
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <div class="small text-muted mb-2">
+      <b>Организатор</b> — всё. <b>Поставщик</b> — розлив, упаковка, «отправлено», доставки (создать, подтвердить,
+      ярлыки, коробки), выгрузки Excel и загрузка ссылок на оплату. Оплату, состав, удаление, покупателей и наличие
+      поставщик не видит и не меняет.
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Сменить пароль</th><th></th></tr></thead>
+        <tbody>
+        {% for u in users %}
+        <tr class="{{ '' if u.active else 'text-muted' }}">
+          <td><b>{{ u.login }}</b>{% if not u.active %} <span class="badge bg-secondary">отключён</span>{% endif %}</td>
+          <td>{{ u.name or '—' }}</td>
+          <td>{{ ROLE_LABELS.get(u.role, u.role) }}</td>
+          <td>
+            <form method="POST" action="/users/{{ u.id }}/password" class="d-flex gap-1">
+              <input type="password" name="password" class="form-control form-control-sm" style="max-width:170px"
+                     placeholder="новый пароль" minlength="8" autocomplete="new-password" required>
+              <button class="btn btn-sm btn-outline-primary" type="submit">OK</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="/users/{{ u.id }}/active">
+              <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+              <button class="btn btn-sm {{ 'btn-outline-danger' if u.active else 'btn-outline-success' }}" type="submit">
+                {{ 'Отключить' if u.active else 'Включить' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h6 class="mb-3">Новый пользователь</h6>
+    <form method="POST" action="/users/add" class="row g-2">
+      <div class="col-12 col-md-3"><input class="form-control" name="login" placeholder="логин" autocapitalize="none" required></div>
+      <div class="col-12 col-md-3"><input class="form-control" name="name" placeholder="имя (как показывать)"></div>
+      <div class="col-6 col-md-2">
+        <select class="form-select" name="role">
+          <option value="supplier">поставщик</option>
+          <option value="admin">организатор</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2"><input class="form-control" type="password" name="password" placeholder="пароль"
+                                         minlength="8" autocomplete="new-password" required></div>
+      <div class="col-12 col-md-2"><button class="btn btn-primary w-100" type="submit">Добавить</button></div>
+    </form>
+    <div class="small text-muted mt-2">Пароль — от 8 символов. Передай его человеку лично, не в общем чате.</div>
+  </div>
+</div>
+{% endblock %}

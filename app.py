@@ -15,6 +15,159 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 from models import get_db, init_db, get_setting, set_setting
+import dash_auth
+
+dash_auth.init()
+
+# ================== Вход: каждый запрос — только после логина ==================
+# Открыто без входа: страница входа/первой настройки, статика и каталог для сайта
+# betweenatelier.com (catalog_api: /catalog и /assets/...).
+_PUBLIC_EXACT = {"/login", "/logout", "/setup", "/catalog", "/favicon.ico", "/sw.js"}
+_PUBLIC_PREFIX = ("/static/", "/assets/")
+
+
+def _is_admin(request):
+    u = getattr(request.state, "user", None)
+    return bool(u and u["role"] == dash_auth.ROLE_ADMIN)
+
+
+templates.env.globals["is_admin"] = _is_admin
+templates.env.globals["ROLE_LABELS"] = dash_auth.ROLE_LABELS
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    if path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX) or request.method == "OPTIONS":
+        return await call_next(request)
+    from urllib.parse import quote
+    user = dash_auth.user_from_cookie(request.cookies.get(dash_auth.COOKIE, ""))
+    wants_html = request.method in ("GET", "HEAD") and not path.startswith("/api/")
+    if not user:
+        if wants_html:
+            return RedirectResponse(url=f"/login?next={quote(path)}", status_code=303)
+        return JSONResponse({"ok": False, "error": "Нужно войти заново"}, status_code=401)
+    if not dash_auth.allowed(user, request.method, path):
+        if wants_html:
+            return HTMLResponse("<div style='font-family:system-ui;padding:40px;text-align:center'>"
+                                "<h3>Нет доступа</h3><p>Этот раздел доступен только организатору.</p>"
+                                "<p><a href='/'>← На главную</a></p></div>", status_code=403)
+        return JSONResponse({"ok": False, "error": "Недоступно для вашей роли"}, status_code=403)
+    request.state.user = user
+    return await call_next(request)
+
+
+def _client_ip(request):
+    return request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip() \
+        or (request.client.host if request.client else "")
+
+
+def _safe_next(nxt):
+    return nxt if (nxt or "").startswith("/") and not nxt.startswith("//") else "/"
+
+
+def _login_cookie(resp, user, request):
+    # за nginx по https — кука только для https; локально (http) — без флага, иначе вход не работает
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    resp.set_cookie(dash_auth.COOKIE, dash_auth.make_session(user), max_age=dash_auth.SESSION_DAYS * 86400,
+                    httponly=True, secure=https, samesite="lax")
+    return resp
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/", err: str = ""):
+    return templates.TemplateResponse("login.html", {"request": request, "next": _safe_next(next), "err": err})
+
+
+@app.post("/login")
+def login_submit(request: Request, login: str = Form(""), password: str = Form(""), next: str = Form("/")):
+    from urllib.parse import quote
+    ip = _client_ip(request)
+    if dash_auth.blocked(ip):
+        return RedirectResponse(url=f"/login?err={quote('Слишком много попыток. Подожди 10 минут.')}", status_code=303)
+    u = dash_auth.find_login(login)
+    if not u or not u["active"] or not dash_auth.verify_password(password, u["pass_hash"]):
+        dash_auth.note_fail(ip)
+        return RedirectResponse(url=f"/login?next={quote(_safe_next(next))}&err={quote('Неверный логин или пароль')}",
+                                status_code=303)
+    dash_auth.clear_fails(ip)
+    return _login_cookie(RedirectResponse(url=_safe_next(next), status_code=303), u, request)
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie(dash_auth.COOKIE)
+    return resp
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request, code: str = "", err: str = ""):
+    ok = dash_auth.check_setup_code(code)
+    return templates.TemplateResponse("setup.html", {"request": request, "code": code, "ok": ok, "err": err})
+
+
+@app.post("/setup")
+def setup_submit(request: Request, code: str = Form(""), login: str = Form(""), name: str = Form(""),
+                 password: str = Form(""), password2: str = Form("")):
+    """Организатор по одноразовому коду сама задаёт логин и пароль (или сбрасывает свой)."""
+    from urllib.parse import quote
+    back = lambda m: RedirectResponse(url=f"/setup?code={quote(code)}&err={quote(m)}", status_code=303)
+    ip = _client_ip(request)
+    if dash_auth.blocked(ip):
+        return back("Слишком много попыток. Подожди 10 минут.")
+    if not dash_auth.check_setup_code(code):
+        dash_auth.note_fail(ip)
+        return back("Код недействителен или устарел.")
+    if password != password2:
+        return back("Пароли не совпадают.")
+    existing = dash_auth.find_login(login)
+    if existing:
+        if existing["role"] != dash_auth.ROLE_ADMIN:
+            return back("Этот логин занят не организатором.")
+        err = dash_auth.set_password(existing["id"], password)
+        dash_auth.set_active(existing["id"], True)
+    else:
+        err = dash_auth.create_user(login, name, dash_auth.ROLE_ADMIN, password)
+    if err:
+        return back(err)
+    dash_auth.burn_setup_code()
+    return _login_cookie(RedirectResponse(url="/", status_code=303), dash_auth.find_login(login), request)
+
+
+@app.get("/users", response_class=HTMLResponse)
+def users_page(request: Request, msg: str = "", err: str = ""):
+    return templates.TemplateResponse("users.html", {"request": request, "users": dash_auth.list_users(),
+                                                     "msg": msg, "err": err})
+
+
+@app.post("/users/add")
+def users_add(login: str = Form(""), name: str = Form(""), role: str = Form("supplier"), password: str = Form("")):
+    from urllib.parse import quote
+    err = dash_auth.create_user(login, name, role, password)
+    q = f"err={quote(err)}" if err else f"msg={quote('Добавлен: ' + dash_auth.clean_login(login))}"
+    return RedirectResponse(url=f"/users?{q}", status_code=303)
+
+
+@app.post("/users/{uid}/password")
+def users_password(uid: int, password: str = Form("")):
+    from urllib.parse import quote
+    err = dash_auth.set_password(uid, password)
+    q = f"err={quote(err)}" if err else f"msg={quote('Пароль изменён — старые входы этого пользователя погашены.')}"
+    return RedirectResponse(url=f"/users?{q}", status_code=303)
+
+
+@app.post("/users/{uid}/active")
+def users_active(request: Request, uid: int, active: int = Form(0)):
+    from urllib.parse import quote
+    me = request.state.user
+    u = dash_auth.get_user(uid) if active == 0 else None
+    if not active and uid == me["id"]:
+        return RedirectResponse(url=f"/users?err={quote('Себя отключить нельзя.')}", status_code=303)
+    if not active and u and u["role"] == dash_auth.ROLE_ADMIN and dash_auth.admins_count() <= 1:
+        return RedirectResponse(url=f"/users?err={quote('Нельзя отключить последнего организатора.')}", status_code=303)
+    dash_auth.set_active(uid, bool(active))
+    return RedirectResponse(url="/users", status_code=303)
 
 # === Функция для получения CSV из Google Sheets ===
 def make_csv_url(sheet_url: str) -> str:

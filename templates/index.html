@@ -7,10 +7,12 @@
     <div class="col">
         <h2><i class="bi bi-box-seam"></i> Закупки</h2>
     </div>
+    {% if is_admin(request) %}
     <div class="col text-end">
         <a href="/zakupka/new" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Новая закупка</a>
         <a href="/nalichie/new" class="btn btn-outline-primary"><i class="bi bi-box"></i> Заказ с наличия</a>
     </div>
+    {% endif %}
 </div>
 
 <!-- Активные закупки -->
@@ -30,11 +32,13 @@
                     <a href="/zakupka/{{ zakupka.id }}" class="btn btn-primary btn-sm">
                         <i class="bi bi-eye"></i> Открыть
                     </a>
+                    {% if is_admin(request) %}
                     <form method="POST" action="/zakupka/{{ zakupka.id }}/close" class="d-inline">
                         <button type="submit" class="btn btn-outline-secondary btn-sm" onclick="return confirm('Перевести в архив?')">
                             <i class="bi bi-archive"></i> В архив
                         </button>
                     </form>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -63,6 +67,7 @@
                     <a href="/zakupka/{{ zakupka.id }}" class="btn btn-outline-secondary btn-sm">
                         <i class="bi bi-eye"></i> Смотреть
                     </a>
+                    {% if is_admin(request) %}
                     <form method="POST" action="/zakupka/{{ zakupka.id }}/reopen" class="d-inline">
                         <button type="submit" class="btn btn-outline-primary btn-sm">
                             <i class="bi bi-arrow-repeat"></i> Восстановить
@@ -75,6 +80,7 @@
                         <i class="bi bi-trash"></i> Удалить архив
                     </button>
                 </form>
+                {% endif %}
             </div>
         </div>
     </div>

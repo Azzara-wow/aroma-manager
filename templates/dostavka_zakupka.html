@@ -18,7 +18,7 @@
 <div class="text-muted small mb-3">
   Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
   Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
-  <a href="/dostavka" class="ms-2">Все получатели и ПВЗ отправления →</a>
+  {% if is_admin(request) %}<a href="/dostavka" class="ms-2">Все получатели и ПВЗ отправления →</a>{% endif %}
 </div>
 
 {% if sheet_error %}

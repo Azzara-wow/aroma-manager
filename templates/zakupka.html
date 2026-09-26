@@ -164,7 +164,7 @@
     {% else %}
     <span class="badge bg-secondary ms-2">Архив</span>
     {% endif %}
-    {% if zakupka.status == 'active' %}
+    {% if zakupka.status == 'active' and is_admin(request) %}
     <button type="button" class="btn btn-success btn-sm ms-2" id="sync-open">
         <i class="bi bi-arrow-repeat"></i> Обновить из витрины
     </button>
@@ -449,11 +449,13 @@
               <input type="file" name="file" accept=".xlsx" class="form-control form-control-sm" style="max-width:210px" required>
               <button class="btn btn-outline-primary btn-sm" type="submit"><i class="bi bi-upload"></i> Загрузить ссылки</button>
             </form>
+            {% if is_admin(request) %}
             <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-push" class="m-0">
               <button class="btn btn-outline-secondary btn-sm" type="submit" title="Суммы, доставка и отметки оплаты — без файла, ссылки не трогаются">
                 <i class="bi bi-arrow-up-circle"></i> Обновить суммы в витрине
               </button>
             </form>
+            {% endif %}
             <details class="text-muted small w-100">
               <summary>Как это работает</summary>
               Выгрузи → в файле сверху те, кто платит <b>по ссылке</b>, ниже — <b>на карту</b> (строку можно перенести вниз руками).
@@ -530,7 +532,8 @@
                                 <td><strong>{{ who(buyer_name) }}</strong></td>
                                 <td>{{ "%.0f"|format(data.sum_zakupka) if data.sum_zakupka else "—" }}</td>
                                 <td>
-                                    {% if data.sum_zakupka > 0 %}
+                                    {% if data.sum_zakupka > 0 and not is_admin(request) %}{{ data.delivery or '—' }}
+                                    {% elif data.sum_zakupka > 0 %}
                                     <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
                                            style="width:84px" data-buyer="{{ buyer_name }}"
                                            value="{{ data.delivery_manual if data.delivery_manual is not none else '' }}"
@@ -540,7 +543,10 @@
                                 </td>
                                 <td><strong class="bill-total" data-buyer="{{ buyer_name }}">{{ data.bill_total if data.bill_total else "—" }}</strong></td>
                                 <td style="min-width:180px">
-                                    {% if data.sum_zakupka > 0 %}
+                                    {% if data.sum_zakupka > 0 and not is_admin(request) %}
+                                    <span class="badge {{ 'bg-warning text-dark' if data.method == 'card' else 'bg-primary' }}">{{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}</span>
+                                    {% if data.method == 'card' and data.payto %}<div class="small text-muted mt-1">{{ data.payto }}</div>{% endif %}
+                                    {% elif data.sum_zakupka > 0 %}
                                     <button type="button" class="btn btn-sm paymethod-btn {{ 'btn-outline-warning' if data.method == 'card' else 'btn-outline-primary' }}"
                                             data-buyer="{{ buyer_name }}" data-method="{{ data.method }}">
                                         {{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}
@@ -552,7 +558,7 @@
                                 </td>
                                 <td>
                                     {% if data.sum_zakupka > 0 %}
-                                    <input type="checkbox"
+                                    <input type="checkbox" {{ '' if is_admin(request) else 'disabled' }}
                                            class="status-checkbox payment-zakupka-checkbox"
                                            data-buyer="{{ buyer_name }}"
                                            {% if data.payment_zakupka == 1 %}checked{% endif %}>
@@ -563,7 +569,7 @@
                                 <td>{{ "%.0f"|format(data.sum_nalichie) if data.sum_nalichie else "—" }}</td>
                                 <td>
                                     {% if data.sum_nalichie > 0 %}
-                                    <input type="checkbox"
+                                    <input type="checkbox" {{ '' if is_admin(request) else 'disabled' }}
                                            class="status-checkbox payment-nalichie-checkbox"
                                            data-buyer="{{ buyer_name }}"
                                            {% if data.payment_nalichie == 1 %}checked{% endif %}>
@@ -608,6 +614,12 @@
                         </div>
                         <div class="m-pay-rows">
                             {% if data.sum_zakupka and data.sum_zakupka > 0 %}
+                            {% if not is_admin(request) %}
+                            <div class="m-pay-row">
+                                <span>Доставка {{ data.delivery or '—' }} · итого <b>{{ data.bill_total }}</b> ₽</span>
+                                <span class="badge {{ 'bg-warning text-dark' if data.method == 'card' else 'bg-primary' }}" style="flex:0 0 auto">{{ '🏦 на карту' if data.method == 'card' else '🔗 по ссылке' }}</span>
+                            </div>
+                            {% else %}
                             <div class="m-pay-row">
                                 <span>Доставка, ₽</span>
                                 <input type="text" inputmode="decimal" class="form-control form-control-sm bill-fee"
@@ -626,16 +638,17 @@
                                 <input type="text" class="form-control form-control-sm bill-payto" data-buyer="{{ buyer_name }}"
                                        value="{{ data.payto }}" placeholder="куда переводить: +7913… Яндекс">
                             </div>
+                            {% endif %}
                             <label class="m-pay-row">
                                 <span>Закупка · {{ "%.0f"|format(data.sum_zakupka) }} ₽</span>
-                                <input type="checkbox" class="m-paycheck" data-paykind="payment-zakupka"
+                                <input type="checkbox" class="m-paycheck" data-paykind="payment-zakupka" {{ '' if is_admin(request) else 'disabled' }}
                                        data-buyer="{{ buyer_name }}" {% if data.payment_zakupka == 1 %}checked{% endif %}>
                             </label>
                             {% endif %}
                             {% if data.sum_nalichie and data.sum_nalichie > 0 %}
                             <label class="m-pay-row">
                                 <span>Наличие · {{ "%.0f"|format(data.sum_nalichie) }} ₽</span>
-                                <input type="checkbox" class="m-paycheck" data-paykind="payment-nalichie"
+                                <input type="checkbox" class="m-paycheck" data-paykind="payment-nalichie" {{ '' if is_admin(request) else 'disabled' }}
                                        data-buyer="{{ buyer_name }}" {% if data.payment_nalichie == 1 %}checked{% endif %}>
                             </label>
                             {% endif %}
@@ -652,6 +665,7 @@
         </div>
     </div>
 
+    {% if is_admin(request) %}
     <!-- Вкладка СОСТАВ: редактирование позиций прямо в базе (статусы не трогаем) -->
     <div class="tab-pane fade" id="sostav" role="tabpanel">
         <div class="card shadow-sm">
@@ -703,6 +717,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}
 

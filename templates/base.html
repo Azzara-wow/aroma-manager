@@ -21,9 +21,19 @@
 {# 4 раздела; действия («Новая закупка», «+ Заказ с наличия») — кнопками внутри разделов #}
 {% set _p = request.url.path if request is defined else '' %}
 <li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p == '/' or _p.startswith('/zakupka') or _p.startswith('/dostavka/zakupka') }}" href="/"><i class="bi bi-box-seam"></i> Закупки</a></li>
+{% if is_admin(request) %}
 <li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/nalichie') }}" href="/nalichie"><i class="bi bi-box"></i> Наличие</a></li>
 <li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/buyers') }}" href="/buyers"><i class="bi bi-people"></i> Покупатели</a></li>
 <li class="nav-item"><a class="nav-link {{ 'active fw-semibold' if _p.startswith('/dostavka') and not _p.startswith('/dostavka/zakupka') }}" href="/dostavka"><i class="bi bi-truck"></i> Доставки</a></li>
+{% endif %}
+{% set _u = request.state.user if request is defined and request.state.user is defined else none %}
+{% if _u %}
+<li class="nav-item ms-lg-3 d-flex align-items-center small text-muted">
+    <span class="me-2">{{ _u.name or _u.login }} · {{ ROLE_LABELS.get(_u.role, _u.role) }}</span>
+    {% if is_admin(request) %}<a class="nav-link px-1 {{ 'active fw-semibold' if _p.startswith('/users') }}" href="/users" title="Пользователи"><i class="bi bi-person-lock"></i></a>{% endif %}
+    <a class="nav-link px-1" href="/logout" title="Выйти"><i class="bi bi-box-arrow-right"></i></a>
+</li>
+{% endif %}
 </ul>
 </div>
 </nav>
