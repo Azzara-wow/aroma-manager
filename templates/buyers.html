@@ -3,275 +3,119 @@
 {% block title %}Покупатели — Менеджер закупок Luzi{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col">
-        <h2><i class="bi bi-people"></i> Покупатели</h2>
-    </div>
-    <div class="col text-end">
-        <form method="POST" action="/buyers/autolink" class="d-inline">
-            <button class="btn btn-outline-success" type="submit"
-                    title="Проставить телефон всем, у кого он есть в имени (79… - Имя)">
-                <i class="bi bi-link-45deg"></i> Привязать по телефону из имени
-            </button>
-        </form>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addBuyerModal">
-            <i class="bi bi-person-plus"></i> Добавить покупателя
-        </button>
-    </div>
+<style>
+.bp-head{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.bp-chips{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; }
+.bp-chips .btn{ white-space:nowrap; }
+.bp-list{ display:flex; flex-direction:column; gap:8px; }
+.bp-row{ display:flex; gap:12px; align-items:center; padding:10px 12px; border:1px solid var(--bs-border-color);
+         border-radius:10px; background:var(--bs-body-bg); color:inherit; text-decoration:none; }
+.bp-row:hover{ background:var(--bs-tertiary-bg); }
+.bp-main{ flex:1; min-width:0; }
+.bp-name{ font-weight:600; font-size:1.05rem; }
+.bp-phone{ color:var(--bs-secondary-color); font-size:.85rem; margin-left:6px; }
+.bp-sub{ font-size:.85rem; color:var(--bs-secondary-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bp-badges{ display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; }
+.bp-ya{ background:#fc0; color:#000; }
+@media (max-width:576px){ .bp-row{ flex-wrap:wrap; } .bp-badges{ justify-content:flex-start; width:100%; } }
+</style>
+
+<div class="bp-head">
+  <h2 class="mb-0"><i class="bi bi-people"></i> Покупатели</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="/buyers/names" title="Старая таблица: имя в закупке → телефон">
+      <i class="bi bi-link-45deg"></i> Имена из закупок</a>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newModal">
+      <i class="bi bi-person-plus"></i> Добавить девочку</button>
+  </div>
 </div>
 
-{% if msg %}
-<div class="alert alert-success small"><i class="bi bi-check-circle"></i> {{ msg }}</div>
-{% endif %}
-{% if sheet_error %}
-<div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
-    Лист «Покупатели» недоступен ({{ sheet_error }}) — привязка по подсказке временно без автоподбора.</div>
-{% endif %}
+{% if msg %}<div class="alert alert-success small py-2"><i class="bi bi-check-circle"></i> {{ msg }}</div>{% endif %}
+{% if err %}<div class="alert alert-danger small py-2"><i class="bi bi-exclamation-triangle"></i> {{ err }}</div>{% endif %}
+{% if error %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> Витрина недоступна: {{ error }}</div>{% endif %}
 
-<div class="card shadow-sm">
-    <div class="card-body">
-        {% if buyers %}
-        <form method="POST" action="/buyers/delete-bulk" id="bulk-form" class="d-flex flex-wrap gap-2 align-items-center mb-3"
-              onsubmit="return bulkConfirm()">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="mark-nophone"
-                    title="Отметить всех, у кого имя не в формате «79001234567 - Имя»">
-                ☑ Отметить всех без телефона в имени
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="mark-none">Снять отметки</button>
-            <button type="submit" class="btn btn-sm btn-danger" id="bulk-del" disabled>
-                <i class="bi bi-trash"></i> Удалить отмеченные (<span id="bulk-n">0</span>)
-            </button>
-            <span class="small text-muted">Тех, кто есть в активной закупке, не удалит. Позиции закупок не пострадают.</span>
-        </form>
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th style="width:32px"></th>
-                        <th>Имя</th>
-                        <th>Телефон (личность)</th>
-                        <th>Отчество</th>
-                        <th>Адрес ПВЗ</th>
-                        <th>Действия</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for buyer in buyers %}
-                    <tr id="b-{{ buyer.id }}">
-                        <td><input type="checkbox" class="form-check-input bulk-cb" value="{{ buyer.id }}"
-                                   data-name="{{ buyer.name }}"></td>
-                        <td><strong>{{ buyer.name }}</strong></td>
-                        <td>
-                            {% if buyer.linked_phone %}
-                                <span class="badge bg-success">{{ buyer.linked_phone }}</span>
-                            {% elif buyer.suggested_phone %}
-                                <span class="text-muted small">возможно: {{ buyer.suggested_phone }}</span>
-                            {% else %}
-                                <span class="badge bg-secondary">не привязан</span>
-                            {% endif %}
-                            <button class="btn btn-sm btn-outline-secondary js-link"
-                                    data-id="{{ buyer.id }}" data-name="{{ buyer.name }}"
-                                    data-current="{{ buyer.linked_phone }}"
-                                    data-suggest="{{ buyer.suggested_phone }}"
-                                    data-bs-toggle="modal" data-bs-target="#linkModal"
-                                    title="Привязать телефон">
-                                <i class="bi bi-link-45deg"></i>
-                            </button>
-                        </td>
-                        <td>{{ buyer.middle_name or '—' }}</td>
-                        <td><small>{{ buyer.address or '—' }}</small></td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-primary"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#editBuyerModal{{ buyer.id }}">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <!-- Удаление через POST-форму, а не ссылку.
-                                 Раньше тут была <a href="/buyers/delete/..">, и боты/прелоадеры
-                                 дёргали её GET-запросом, молча удаляя покупателей. Теперь только POST. -->
-                            <form method="POST" action="/buyers/delete/{{ buyer.id }}"
-                                  style="display:inline" class="del-one" data-name="{{ buyer.name }}">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-
-                    <!-- Модальное окно редактирования -->
-                    <div class="modal fade" id="editBuyerModal{{ buyer.id }}" tabindex="-1">
-                        <div class="modal-dialog">
-                            <div class="modal-content">
-                                <form method="POST" action="/buyers/edit/{{ buyer.id }}">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title">Редактировать: {{ buyer.name }}</h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <div class="mb-3">
-                                            <label class="form-label">Имя и фамилия</label>
-                                            <input type="text" class="form-control" name="name" value="{{ buyer.name }}" required>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">Отчество</label>
-                                            <input type="text" class="form-control" name="middle_name" value="{{ buyer.middle_name or '' }}">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">Телефон</label>
-                                            <input type="text" class="form-control" name="phone" value="{{ buyer.phone or '' }}">
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">Адрес ПВЗ</label>
-                                            <textarea class="form-control" name="address" rows="2">{{ buyer.address or '' }}</textarea>
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                                        <button type="submit" class="btn btn-primary">Сохранить</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> Пока нет покупателей. Они будут добавляться автоматически при импорте закупок.
-        </div>
-        {% endif %}
-    </div>
+{% if people %}
+<input class="form-control mb-2" id="bp-search" placeholder="Поиск: имя, фамилия, телефон, город">
+<div class="bp-chips mb-2">
+  <button class="btn btn-sm btn-dark" data-f="all">Все {{ people|length }}</button>
+  <button class="btn btn-sm btn-outline-secondary" data-f="active">В закупке {{ n_active }}</button>
+  <button class="btn btn-sm btn-outline-secondary" data-f="nopvz">Без ПВЗ {{ n_nopvz }}</button>
+  <button class="btn btn-sm btn-outline-secondary" data-f="nocode">Без входа {{ n_nocode }}</button>
 </div>
 
-<!-- Модальное окно добавления -->
-<div class="modal fade" id="addBuyerModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST" action="/buyers/add">
-                <div class="modal-header">
-                    <h5 class="modal-title">Новый покупатель</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Имя и фамилия <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" name="name" required
-                               placeholder="Иванова Анна">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Отчество</label>
-                        <input type="text" class="form-control" name="middle_name"
-                               placeholder="Ивановна">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Телефон</label>
-                        <input type="text" class="form-control" name="phone"
-                               placeholder="+7 9XX XXX-XX-XX">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Адрес ПВЗ</label>
-                        <textarea class="form-control" name="address" rows="2"
-                                  placeholder="СДЭК ул. Мира, 5"></textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="submit" class="btn btn-primary">Добавить</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Модалка: привязка телефона (личность) -->
-<div class="modal fade" id="linkModal" tabindex="-1">
-  <div class="modal-dialog">
-    <form class="modal-content" method="POST" action="/buyers/link">
-      <div class="modal-header">
-        <h5 class="modal-title">Привязка телефона — <span id="link-name"></span></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="bp-list">
+  {% for r in people %}
+  {% set has_pvz = r.pvz_id or (r.carrier_manual and r.pvz_address) %}
+  <a class="bp-row" href="/buyers/p/{{ r.phone }}"
+     data-q="{{ (r.name ~ ' ' ~ r.fio ~ ' ' ~ r.phone ~ ' ' ~ r.city ~ ' ' ~ r.email)|lower }}"
+     data-active="{{ 1 if r.in_active }}" data-nopvz="{{ '' if has_pvz else 1 }}" data-nocode="{{ '' if r.has_code else 1 }}">
+    <div class="bp-main">
+      <div><span class="bp-name">{{ r.name or r.fio or '—' }}</span><span class="bp-phone">{{ r.phone }}</span></div>
+      <div class="bp-sub">
+        {% if r.fio and r.fio != r.name %}{{ r.fio }} · {% endif %}
+        {% if has_pvz %}{{ r.pvz_address }}{% else %}<span class="text-danger">ПВЗ не выбран</span>{% endif %}
       </div>
+    </div>
+    <div class="bp-badges">
+      {% if r.in_active %}<span class="badge text-bg-primary">в закупке</span>{% endif %}
+      {% if r.carrier_manual %}<span class="badge text-bg-warning">{{ r.carrier_manual }}</span>
+      {% elif r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
+      {% elif r.pvz_id %}<span class="badge bp-ya">Яндекс</span>{% endif %}
+      {% if not r.has_code %}<span class="badge text-bg-light border" title="Ещё не входила на витрину">без входа</span>{% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+<div id="bp-empty" class="text-muted small mt-2" style="display:none">Никого не нашлось.</div>
+{% elif not error %}
+<div class="text-muted">В базе пока никого нет.</div>
+{% endif %}
+
+<div class="modal fade" id="newModal" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen-sm-down">
+    <form class="modal-content" method="POST" action="/buyers/new">
+      <div class="modal-header"><h5 class="modal-title">Новая девочка</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <input type="hidden" name="buyer_id" id="link-id">
-        <label class="form-label">Получатель из листа «Покупатели»</label>
-        <select class="form-select" name="phone" id="link-phone">
-          <option value="">— не привязывать —</option>
-          {% for o in pick_options %}
-          <option value="{{ o.phone }}">{{ o.label }}</option>
-          {% endfor %}
-        </select>
-        <div class="form-text" id="link-hint"></div>
+        <p class="small text-muted">Для тех, кто прислал адрес в личку и ещё не входил на витрину.
+          Потом она войдёт с этим телефоном, задаст себе код, а адрес уже будет на месте.</p>
+        <label class="form-label">Телефон</label>
+        <input class="form-control mb-2" name="phone" inputmode="tel" placeholder="+7 900 123-45-67" required>
+        <label class="form-label">Имя (как её зовём)</label>
+        <input class="form-control" name="name" required>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-        <button type="submit" class="btn btn-primary">Сохранить</button>
+        <button type="submit" class="btn btn-primary">Добавить и заполнить</button>
       </div>
     </form>
   </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
 <script>
-// --- массовое удаление: отметить без телефона в имени → удалить разом ---
 (function () {
-  const form = document.getElementById('bulk-form');
-  if (!form) return;
-  const cbs = () => Array.from(document.querySelectorAll('.bulk-cb'));
-  const PHONE_NAME = /^7\d{10}\s*-\s*\S/;
-  function refresh() {
-    const n = cbs().filter(c => c.checked).length;
-    document.getElementById('bulk-n').textContent = n;
-    document.getElementById('bulk-del').disabled = !n;
+  const rows = [...document.querySelectorAll('.bp-row')];
+  const q = document.getElementById('bp-search');
+  if (!q) return;
+  let f = 'all';
+  function apply() {
+    const t = q.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach(r => {
+      const ok = (!t || r.dataset.q.includes(t)) && (f === 'all' || r.dataset[f]);
+      r.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    document.getElementById('bp-empty').style.display = shown ? 'none' : '';
   }
-  document.getElementById('mark-nophone').addEventListener('click', function () {
-    cbs().forEach(c => { c.checked = !PHONE_NAME.test(c.dataset.name.trim()); });
-    refresh();
-  });
-  document.getElementById('mark-none').addEventListener('click', function () {
-    cbs().forEach(c => { c.checked = false; }); refresh();
-  });
-  document.addEventListener('change', e => { if (e.target.classList.contains('bulk-cb')) refresh(); });
-  window.bulkConfirm = function () {
-    const picked = cbs().filter(c => c.checked);
-    if (!picked.length) return false;
-    if (!confirm('Удалить отмеченных: ' + picked.length + '?\n\n' +
-                 picked.slice(0, 12).map(c => '• ' + c.dataset.name).join('\n') +
-                 (picked.length > 12 ? '\n…и ещё ' + (picked.length - 12) : ''))) return false;
-    form.querySelectorAll('input[name=ids]').forEach(i => i.remove());
-    picked.forEach(c => {
-      const i = document.createElement('input');
-      i.type = 'hidden'; i.name = 'ids'; i.value = c.value; form.appendChild(i);
+  q.addEventListener('input', apply);
+  document.querySelectorAll('.bp-chips [data-f]').forEach(b => b.addEventListener('click', () => {
+    f = b.dataset.f;
+    document.querySelectorAll('.bp-chips [data-f]').forEach(x => {
+      x.classList.toggle('btn-dark', x === b); x.classList.toggle('btn-outline-secondary', x !== b);
     });
-    return true;
-  };
-  // одиночное удаление — без перезагрузки: строка исчезает, прокрутка остаётся
-  document.querySelectorAll('form.del-one').forEach(function (f) {
-    f.addEventListener('submit', async function (e) {
-      e.preventDefault();
-      if (!confirm('Удалить покупателя ' + f.dataset.name + '?')) return;
-      try {
-        const r = await fetch(f.action, { method: 'POST' });
-        if (r.ok) { const tr = f.closest('tr'); if (tr) tr.remove(); refresh(); }
-        else alert('Не удалось удалить');
-      } catch (err) { alert('Сбой сети'); }
-    });
-  });
+    apply();
+  }));
 })();
-
-document.querySelectorAll('.js-link').forEach(function (b) {
-  b.addEventListener('click', function () {
-    document.getElementById('link-id').value = b.dataset.id || '';
-    document.getElementById('link-name').textContent = b.dataset.name || '';
-    var sel = document.getElementById('link-phone');
-    sel.value = b.dataset.current || b.dataset.suggest || '';
-    var hint = document.getElementById('link-hint');
-    if (b.dataset.current) hint.textContent = 'Уже привязан: ' + b.dataset.current;
-    else if (b.dataset.suggest) hint.textContent = 'Подсказка по имени: ' + b.dataset.suggest + ' — проверь и сохрани.';
-    else hint.textContent = 'Совпадение по имени не найдено — выбери вручную.';
-  });
-});
 </script>
 {% endblock %}

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}{{ b.name or b.phone }} — Покупатели{% endblock %}
+
+{% block content %}
+<style>
+.bc-wrap{ max-width:720px; margin:0 auto; }
+.bc-sec{ font-weight:600; margin:18px 0 8px; }
+.bc-carrier .btn{ flex:1; }
+.bc-pvz{ padding:10px 12px; border:1px dashed var(--bs-border-color); border-radius:10px; }
+.bc-bill td{ padding:2px 12px 2px 0; }
+</style>
+<div class="bc-wrap">
+  <a href="/buyers" class="small text-decoration-none">← Покупатели</a>
+  <div class="d-flex flex-wrap align-items-baseline gap-2 mt-1">
+    <h2 class="mb-0">{{ b.name or '—' }}</h2>
+    <span class="text-muted">{{ b.phone }}</span>
+    {% if in_active %}<span class="badge text-bg-primary">в активной закупке</span>{% endif %}
+    {% if b.has_code %}<span class="badge text-bg-success">входит на витрину</span>
+    {% else %}<span class="badge text-bg-light border">ещё не входила</span>{% endif %}
+  </div>
+
+  {% if msg %}<div class="alert alert-success small py-2 mt-2"><i class="bi bi-check-circle"></i> {{ msg }}</div>{% endif %}
+  {% if err %}<div class="alert alert-danger small py-2 mt-2"><i class="bi bi-exclamation-triangle"></i> {{ err }}</div>{% endif %}
+
+  <form method="POST" action="/buyers/p/{{ b.phone }}/save" id="bc-form">
+    <div class="bc-sec">Как зовём</div>
+    <input class="form-control" name="name" value="{{ b.name }}" required>
+
+    <div class="bc-sec">Получатель (для посылки)</div>
+    <div class="row g-2">
+      <div class="col-sm-4"><input class="form-control" name="last_name" value="{{ b.last_name }}" placeholder="Фамилия"></div>
+      <div class="col-sm-4"><input class="form-control" name="first_name" value="{{ b.first_name }}" placeholder="Имя"></div>
+      <div class="col-sm-4"><input class="form-control" name="patronymic" value="{{ b.patronymic }}" placeholder="Отчество"></div>
+    </div>
+    <input class="form-control mt-2" name="email" type="email" value="{{ b.email }}" placeholder="E-mail (для чеков и уведомлений)">
+
+    <div class="bc-sec">Доставка</div>
+    {% set cur = 'other' if b.carrier_manual else (b.carrier or 'yandex') %}
+    <input type="hidden" name="carrier" id="bc-carrier" value="{{ cur }}">
+    <div class="btn-group bc-carrier w-100 mb-2" role="group">
+      <button type="button" class="btn btn-outline-dark" data-c="yandex">Яндекс</button>
+      <button type="button" class="btn btn-outline-dark" data-c="cdek">СДЭК</button>
+      <button type="button" class="btn btn-outline-dark" data-c="other">Другое</button>
+    </div>
+
+    <div id="bc-auto">
+      <input type="hidden" name="pvz_id" id="bc-pvz-id" value="{{ '' if b.carrier_manual else b.pvz_id }}">
+      <input type="hidden" name="pvz_address" id="bc-pvz-address" value="{{ '' if b.carrier_manual else b.pvz_address }}">
+      <div class="bc-pvz mb-2">
+        <div class="small text-muted">ПВЗ получения</div>
+        <div id="bc-pvz-show">{% if b.pvz_id and not b.carrier_manual %}{{ b.pvz_address }}{% else %}<span class="text-danger">не выбран</span>{% endif %}</div>
+      </div>
+      <div class="input-group">
+        <input class="form-control" name="city" id="bc-city" value="{{ b.city }}" placeholder="Город">
+        <button class="btn btn-outline-primary" type="button" id="bc-search"><i class="bi bi-search"></i> Найти ПВЗ</button>
+      </div>
+      <input class="form-control form-control-sm mt-2" id="bc-filter" placeholder="Улица или название, чтобы сузить список" style="display:none">
+      <div id="bc-hint" class="small text-muted mt-1"></div>
+      <div id="bc-results" class="list-group mt-1" style="max-height:50vh;overflow:auto"></div>
+    </div>
+
+    <div id="bc-manual" style="display:none">
+      <input class="form-control mb-2" name="carrier_other" id="bc-other" value="{{ b.carrier_manual }}"
+             placeholder="Чем отправляем: Почта России, Озон, WB…">
+      <textarea class="form-control" name="manual_address" rows="3"
+                placeholder="Адрес, как она прислала (индекс, город, улица или пункт выдачи)">{{ b.pvz_address if b.carrier_manual else '' }}</textarea>
+      <div class="small text-muted mt-1">Такие посылки отправляешь сама, в автоматическую отправку они не попадут.
+        На витрине она увидит этот адрес и сможет его поправить.</div>
+    </div>
+
+    <div class="bc-sec">Заметка (видишь только ты)</div>
+    <textarea class="form-control" name="note" rows="2">{{ b.note }}</textarea>
+    {% if b.address %}<div class="small text-muted mt-2">Адрес, который она писала при регистрации: {{ b.address }}</div>{% endif %}
+
+    <button class="btn btn-primary w-100 mt-3" type="submit"><i class="bi bi-check2"></i> Сохранить</button>
+  </form>
+
+  {% if b.pay_amount or b.pay_link or b.paid or b.tracking_url or b.pay_to %}
+  <div class="bc-sec">Счёт текущей закупки</div>
+  <table class="bc-bill small">
+    {% if b.pay_amount %}<tr><td class="text-muted">К оплате</td><td>{{ b.pay_amount }} ₽{% if b.pay_delivery %} (доставка {{ b.pay_delivery }} ₽){% endif %}</td></tr>{% endif %}
+    <tr><td class="text-muted">Оплата</td><td>{% if b.paid %}<span class="text-success">оплачено ✓</span>{% else %}ждём{% endif %}</td></tr>
+    {% if b.pay_link %}<tr><td class="text-muted">Ссылка</td><td><a href="{{ b.pay_link }}" target="_blank" rel="noopener">открыть</a></td></tr>{% endif %}
+    {% if b.pay_to %}<tr><td class="text-muted">На карту</td><td>{{ b.pay_to }}</td></tr>{% endif %}
+    {% if b.tracking_url %}<tr><td class="text-muted">Отслеживание</td><td><a href="{{ b.tracking_url }}" target="_blank" rel="noopener">открыть</a></td></tr>{% endif %}
+  </table>
+  <div class="small text-muted">Меняется во вкладке «Оплата» закупки.</div>
+  {% endif %}
+
+  {% if names %}
+  <div class="bc-sec">В закупках записана как</div>
+  <div class="small">{{ names|join(', ') }}</div>
+  {% endif %}
+
+  <div class="bc-sec">Вход на витрину</div>
+  <form method="POST" action="/buyers/p/{{ b.phone }}/reset-code"
+        onsubmit="return confirm('Сбросить код? При следующем входе она задаст новый.')">
+    <button class="btn btn-outline-secondary btn-sm" type="submit" {{ 'disabled' if not b.has_code }}>
+      <i class="bi bi-key"></i> Сбросить код</button>
+    <span class="small text-muted ms-1">если забыла код</span>
+  </form>
+
+  {% if not in_active %}
+  <form method="POST" action="/buyers/p/{{ b.phone }}/delete" class="mt-4 mb-5"
+        onsubmit="return confirm('Удалить {{ b.name }} из базы? Она больше не сможет войти на витрину с этим телефоном без новой регистрации.')">
+    <button class="btn btn-link text-danger p-0 small" type="submit"><i class="bi bi-trash"></i> Удалить из базы</button>
+  </form>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const initial = { c: $('bc-carrier').value, id: $('bc-pvz-id').value, addr: $('bc-pvz-address').value };
+  function setCarrier(c) {
+    $('bc-carrier').value = c;
+    document.querySelectorAll('.bc-carrier [data-c]').forEach(b => {
+      b.classList.toggle('active', b.dataset.c === c);
+    });
+    $('bc-auto').style.display = c === 'other' ? 'none' : '';
+    $('bc-manual').style.display = c === 'other' ? '' : 'none';
+    $('bc-other').required = c === 'other';
+    // ПВЗ другого перевозчика не подходит: при смене — выбрать заново
+    const same = c === initial.c;
+    $('bc-pvz-id').value = same ? initial.id : '';
+    $('bc-pvz-address').value = same ? initial.addr : '';
+    $('bc-pvz-show').innerHTML = (same && initial.id) ? '' : '<span class="text-danger">не выбран</span>';
+    if (same && initial.id) $('bc-pvz-show').textContent = initial.addr;
+    $('bc-results').innerHTML = ''; $('bc-hint').textContent = ''; $('bc-filter').style.display = 'none';
+  }
+  document.querySelectorAll('.bc-carrier [data-c]').forEach(b => b.addEventListener('click', () => setCarrier(b.dataset.c)));
+  setCarrier(initial.c);
+
+  let points = [];
+  function render() {
+    const t = $('bc-filter').value.trim().toLowerCase(), res = $('bc-results');
+    res.innerHTML = '';
+    points.filter(p => !t || ((p.name || '') + ' ' + (p.address || '')).toLowerCase().includes(t))
+      .slice(0, 150).forEach(p => {
+        const a = document.createElement('button');
+        a.type = 'button'; a.className = 'list-group-item list-group-item-action';
+        a.innerHTML = '<strong></strong><br><small></small>';
+        a.querySelector('strong').textContent = p.name || 'ПВЗ';
+        a.querySelector('small').textContent = p.address || '';
+        a.addEventListener('click', () => {
+          $('bc-pvz-id').value = p.id; $('bc-pvz-address').value = p.address || p.name || '';
+          $('bc-pvz-show').textContent = p.address || p.name;
+          res.querySelectorAll('.active').forEach(e => e.classList.remove('active'));
+          a.classList.add('active');
+          $('bc-hint').textContent = 'Выбран. Не забудь «Сохранить».';
+        });
+        res.appendChild(a);
+      });
+  }
+  async function search() {
+    const city = $('bc-city').value.trim(), carrier = $('bc-carrier').value;
+    if (!city) { $('bc-hint').textContent = 'Впиши город'; return; }
+    $('bc-hint').textContent = 'Ищу пункты…'; $('bc-results').innerHTML = '';
+    try {
+      const d = await (await fetch('/dostavka/pvz?receive=1&limit=2000&carrier=' + carrier +
+                                   '&city=' + encodeURIComponent(city))).json();
+      if ($('bc-carrier').value !== carrier) return;   // пока искали, переключили перевозчика
+      if (!d.ok) { $('bc-hint').textContent = 'Ошибка: ' + (d.error || 'неизвестно'); return; }
+      points = d.points;
+      $('bc-hint').textContent = 'Найдено пунктов: ' + d.count + (d.count > 10 ? '. Сузь список улицей.' : '');
+      $('bc-filter').style.display = d.count > 10 ? '' : 'none';
+      $('bc-filter').value = '';
+      render();
+    } catch (e) { $('bc-hint').textContent = 'Сбой запроса'; }
+  }
+  $('bc-search').addEventListener('click', search);
+  $('bc-city').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+  $('bc-filter').addEventListener('input', render);
+})();
+</script>
+{% endblock %}

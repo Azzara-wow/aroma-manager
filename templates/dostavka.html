@@ -7,7 +7,7 @@
   <div class="col">
     <h2><i class="bi bi-truck"></i> Доставки — получатели</h2>
     <div class="text-muted small">
-      Данные берутся из листа «Покупатели» (aroma_web). Готовы к доставке:
+      Данные — из базы покупателей витрины. Готовы к доставке:
       <strong>{{ ready }}</strong> из {{ total }}.
       ПВЗ отправления — во вкладке «⚙️ Настройки» закупки.
     </div>
@@ -53,7 +53,7 @@
         <tbody>
           {% for r in recipients %}
           <tr>
-            <td><strong>{{ r.name or '—' }}</strong></td>
+            <td><a href="/buyers/p/{{ r.phone }}" class="fw-semibold text-decoration-none">{{ r.name or '—' }}</a></td>
             <td>{{ r.fio or '—' }}</td>
             <td>{{ r.phone or '—' }}</td>
             <td>{{ r.city or '—' }}</td>

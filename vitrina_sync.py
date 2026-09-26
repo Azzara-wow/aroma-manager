@@ -11,25 +11,17 @@
 #   - пара пропала в витрине: не разлита — удаляем, разлита — оставляем с пометкой ext_gone;
 #   - позиции без телефона в имени (добавлены руками в «Состав») не трогаем.
 
-import hashlib
-import json
 import os
 
 import requests
 
-import buyers_sheet
+import buyers_store
 from piece import looks_piece
 
 VITRINA_URL = os.environ.get("AROMA_WEB_URL", "http://127.0.0.1:8001").rstrip("/")
 
 
-def sync_token():
-    env = os.environ.get("SYNC_TOKEN", "").strip()
-    if env:
-        return env
-    with open(buyers_sheet._key_path(), encoding="utf-8") as f:
-        sa = json.load(f)
-    return hashlib.sha256(("aroma-sync:" + sa["private_key"]).encode("utf-8")).hexdigest()
+sync_token = buyers_store.sync_token
 
 
 def fetch():
@@ -55,7 +47,7 @@ def key_of(phone, aroma):
 
 
 def item_key(buyer_name, aroma_name):
-    phone = buyers_sheet.phone_from_name(buyer_name or "")
+    phone = buyers_store.phone_from_name(buyer_name or "")
     return key_of(phone, aroma_name) if phone else None
 
 

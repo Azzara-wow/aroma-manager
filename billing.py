@@ -8,7 +8,7 @@
 # разметка для организатора и поставщика, НЕ факт оплаты. Факт оплаты — честная
 # галочка payment_zakupka; она же уходит в витрину («Оплачено ✓»).
 
-import buyers_sheet
+import buyers_store
 import carriers
 from models import get_setting, set_setting
 
@@ -95,12 +95,12 @@ def _bill(zakupka_id, buyer, phone, goods, paid, deliv):
 
 
 def phone_by_name_map(db):
-    return {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
+    return {b["name"]: buyers_store.normalize_phone(b["phone"] or "")
             for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
 
 
 def phone_of(buyer_name, phone_map):
-    return phone_map.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
+    return phone_map.get(buyer_name, "") or buyers_store.phone_from_name(buyer_name)
 
 
 def delivery_by_phone(db, zakupka_id):

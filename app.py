@@ -573,7 +573,7 @@ def pay_export(zakupka_id: int):
         from urllib.parse import quote
         return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(str(e))}#oplata", status_code=303)
     try:
-        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+        recips = {r["phone"]: r for r in buyers_store.list_recipients()}
     except Exception:
         recips = {}
 
@@ -624,10 +624,10 @@ def _vitrina_invoices(zakupka_id):
 
 
 def _sheet_fields(it):
-    """Поля счёта для листа «Покупатели» (без ссылки — её решает вызывающий)."""
+    """Поля счёта для витрины (без ссылки — её решает вызывающий)."""
     import billing
     return {"amount": it["total"], "delivery": it["delivery"] or "",
-            "paid": buyers_sheet.PAID_MARK if it["paid"] else "",
+            "paid": buyers_store.PAID_MARK if it["paid"] else "",
             # реквизиты перевода — только тем, кто платит на карту
             "payto": it["payto"] if it["method"] == billing.METHOD_CARD else ""}
 
@@ -654,13 +654,13 @@ def _push_one(zakupka_id, buyer):
         u = _sheet_fields(it)
         if it["method"] == billing.METHOD_CARD:
             u["link"] = ""          # на карту — ссылки нет; по ссылке — ссылку не трогаем
-        buyers_sheet.set_pay_row(it["phone"], u)
+        buyers_store.set_pay_row(it["phone"], u)
     except Exception as e:
         print(f"[счёт→витрина] {buyer}: {e}")
 
 
 def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
-    """Отправить счета закупки в витрину (лист «Покупатели», Q:T): итого, доставка,
+    """Отправить счета закупки в витрину: итого, доставка,
     честная отметка оплаты; ссылки — из links, у clear_links ссылка стирается."""
     import billing
     if inv is None:
@@ -676,7 +676,7 @@ def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
         elif it["phone"] in clear_links or it["method"] == billing.METHOD_CARD:
             u["link"] = ""
         updates[it["phone"]] = u
-    return buyers_sheet.set_pay_fields_bulk(updates), len(inv)
+    return buyers_store.set_pay_fields_bulk(updates), len(inv)
 
 
 @app.post("/zakupka/{zakupka_id}/pay-import")
@@ -718,8 +718,8 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
             mode = "skip"; continue
         if mode == "skip" or col_phone >= len(r):
             continue
-        ph = buyers_sheet.normalize_phone(r[col_phone] or "")
-        if not buyers_sheet.valid_phone(ph):
+        ph = buyers_store.normalize_phone(r[col_phone] or "")
+        if not buyers_store.valid_phone(ph):
             continue
         if mode == "card":
             card_phones.add(ph)
@@ -746,12 +746,12 @@ def pay_import(zakupka_id: int, file: UploadFile = File(...)):
     try:
         res, n = _push_invoices(zakupka_id, links=links, clear_links=card_phones, inv=inv)
     except Exception as e:
-        return _back(f"Ошибка записи в лист: {e}")
+        return _back(f"Не удалось отправить в витрину: {e}")
     msg = (f"Счета отправлены в витрину: {n}. Ссылок внесено: {len(links)}"
            f"{f', на карту: {len(card_phones)}' if card_phones else ''}.")
     nf = res.get("not_found") or []
     if nf:
-        msg += f" Не нашлись в листе «Покупатели»: {len(nf)} (тел.: {', '.join(nf[:5])}{'…' if len(nf) > 5 else ''})."
+        msg += f" Нет среди покупателей витрины: {len(nf)} (тел.: {', '.join(nf[:5])}{'…' if len(nf) > 5 else ''})."
     return _back(msg)
 
 
@@ -763,9 +763,9 @@ def pay_push(zakupka_id: int):
         res, n = _push_invoices(zakupka_id)
         msg = f"Счета обновлены в витрине: {n}."
         if res.get("not_found"):
-            msg += f" Не нашлись в листе: {len(res['not_found'])}."
+            msg += f" Нет среди покупателей витрины: {len(res['not_found'])}."
     except Exception as e:
-        msg = str(e) if "витрин" in str(e) else f"Ошибка записи в лист: {e}"
+        msg = str(e) if "витрин" in str(e) else f"Не удалось отправить в витрину: {e}"
     return RedirectResponse(url=f"/zakupka/{zakupka_id}?paymsg={quote(msg)}#oplata", status_code=303)
 
 
@@ -955,14 +955,14 @@ async def toggle_upakovka(item_id: int, source: str = "zakupka"):
 
 
 def _sheet_paid(buyer_name, paid):
-    """Честная отметка оплаты → витрина (лист «Покупатели», кол. T). Ошибки не роняют клик."""
+    """Честная отметка оплаты → витрина. Ошибки не роняют клик."""
     import billing
     try:
         db = get_db()
         phone = billing.phone_of(buyer_name, billing.phone_by_name_map(db))
         db.close()
         if phone:
-            buyers_sheet.set_paid(phone, paid)
+            buyers_store.set_paid(phone, paid)
     except Exception as e:
         print(f"[paid→витрина] {buyer_name}: {e}")
 
@@ -1161,7 +1161,7 @@ def import_vitrina(name: str = Form(...), clear_bills: str = Form("")):
     msg = ""
     if clear_bills:
         try:
-            buyers_sheet.set_pay_fields_bulk({}, clear_others=True)
+            buyers_store.set_pay_fields_bulk({}, clear_others=True)
             msg = "Счета прошлой закупки в витрине очищены."
         except Exception as e:
             msg = f"Закупка создана, но счета в витрине очистить не удалось: {e}"
@@ -1223,26 +1223,145 @@ async def delete_zakupka(zakupka_id: int):
     return RedirectResponse(url="/", status_code=303)
 
 
-# === Покупатели ===
+# === Покупатели (база витрины): глобальные данные девочки ===
+def _active_phones():
+    """Телефоны девочек в активных закупках (их не удаляем)."""
+    db = get_db()
+    names = [r["buyer_name"] for r in db.execute(
+        "SELECT DISTINCT zi.buyer_name FROM zakaz_items zi JOIN zakupkas z ON z.id = zi.zakupka_id "
+        "WHERE z.status = 'active'").fetchall()]
+    import billing
+    pmap = billing.phone_by_name_map(db)
+    db.close()
+    return {p for p in (billing.phone_of(n, pmap) for n in names) if p}
+
+
 @app.get("/buyers", response_class=HTMLResponse)
+def buyers_page(request: Request, msg: str = "", err: str = ""):
+    error, people = None, []
+    try:
+        people = buyers_store.list_recipients()
+    except Exception as e:
+        error = str(e)
+    people.sort(key=lambda r: (r["name"] or r["fio"]).lower())
+    active = _active_phones() if people else set()
+    for r in people:
+        r["in_active"] = r["phone"] in active
+    return templates.TemplateResponse("buyers.html", {
+        "request": request, "people": people, "error": error, "msg": msg, "err": err,
+        "n_nopvz": sum(1 for r in people if not (r["pvz_id"] or (r["carrier_manual"] and r["pvz_address"]))),
+        "n_nocode": sum(1 for r in people if not r["has_code"]),
+        "n_active": sum(1 for r in people if r["in_active"]),
+    })
+
+
+@app.post("/buyers/new")
+def buyers_new(phone: str = Form(""), name: str = Form("")):
+    """Завести девочку без входа (адрес прислала в личку). Код она задаст сама,
+    когда впервые войдёт на витрину с этим телефоном."""
+    from urllib.parse import quote
+    try:
+        res = buyers_store.save_buyer(phone, {"name": name.strip()}, create=True)
+    except Exception as e:
+        res = {"ok": False, "reason": str(e)}
+    if not res["ok"]:
+        return RedirectResponse(url=f"/buyers?err={quote(res['reason'])}", status_code=303)
+    return RedirectResponse(url=f"/buyers/p/{res['buyer']['phone']}?msg={quote('Девочка добавлена')}",
+                            status_code=303)
+
+
+@app.get("/buyers/p/{phone}", response_class=HTMLResponse)
+def buyer_card(request: Request, phone: str, msg: str = "", err: str = ""):
+    try:
+        r = buyers_store.get_recipient(phone)
+    except Exception as e:
+        return _op_msg(f"Не удалось получить покупателей из витрины: {e}")
+    if not r:
+        raise HTTPException(status_code=404, detail="Нет такой девочки в базе витрины")
+    db = get_db()
+    names = [x["name"] for x in db.execute("SELECT name FROM buyers WHERE phone = ? ORDER BY name",
+                                           (r["phone"],)).fetchall()]
+    db.close()
+    return templates.TemplateResponse("buyer_card.html", {
+        "request": request, "b": r, "msg": msg, "err": err, "names": names,
+        "in_active": r["phone"] in _active_phones(),
+    })
+
+
+@app.post("/buyers/p/{phone}/save")
+def buyer_save(phone: str, name: str = Form(""), last_name: str = Form(""),
+               first_name: str = Form(""), patronymic: str = Form(""), city: str = Form(""),
+               carrier: str = Form("yandex"), carrier_other: str = Form(""),
+               pvz_address: str = Form(""), pvz_id: str = Form(""),
+               manual_address: str = Form(""), email: str = Form(""), note: str = Form("")):
+    from urllib.parse import quote
+    if not name.strip():
+        return RedirectResponse(url=f"/buyers/p/{phone}?err={quote('Имя не может быть пустым')}", status_code=303)
+    fields = {"name": name, "last_name": last_name, "first_name": first_name,
+              "patronymic": patronymic, "city": city, "email": email, "note": note}
+    if carrier in buyers_store.SELF_CARRIERS:
+        fields.update(carrier=carrier, pvz_address=pvz_address, pvz_id=pvz_id)
+    else:
+        label = carrier_other.strip()
+        if not label or label.lower() in buyers_store.SELF_CARRIERS:
+            return RedirectResponse(url=f"/buyers/p/{phone}?err={quote('Впишите, чем отправляем (Почта России, Озон…)')}",
+                                    status_code=303)
+        # ручная доставка: свободный адрес, ПВЗ-кода нет (в автоматическую отправку не уйдёт)
+        fields.update(carrier=label, pvz_address=manual_address, pvz_id="")
+    try:
+        res = buyers_store.save_buyer(phone, fields)
+    except Exception as e:
+        res = {"ok": False, "reason": str(e)}
+    if not res["ok"]:
+        return RedirectResponse(url=f"/buyers/p/{phone}?err={quote(res['reason'])}", status_code=303)
+    return RedirectResponse(url=f"/buyers/p/{phone}?msg={quote('Сохранено')}", status_code=303)
+
+
+@app.post("/buyers/p/{phone}/reset-code")
+def buyer_reset_code(phone: str):
+    from urllib.parse import quote
+    try:
+        res = buyers_store.reset_code(phone)
+    except Exception as e:
+        res = {"ok": False, "reason": str(e)}
+    m = ("msg", "Код сброшен. При следующем входе она задаст новый.") if res["ok"] \
+        else ("err", f"Не удалось сбросить код: {res.get('reason')}")
+    return RedirectResponse(url=f"/buyers/p/{phone}?{m[0]}={quote(m[1])}", status_code=303)
+
+
+@app.post("/buyers/p/{phone}/delete")
+def buyer_delete(phone: str):
+    from urllib.parse import quote
+    if buyers_store.normalize_phone(phone) in _active_phones():
+        return RedirectResponse(url=f"/buyers/p/{phone}?err={quote('Она есть в активной закупке — удалять нельзя')}",
+                                status_code=303)
+    try:
+        buyers_store.delete_buyer(phone)
+    except Exception as e:
+        return RedirectResponse(url=f"/buyers/p/{phone}?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url=f"/buyers?msg={quote('Девочка удалена из базы')}", status_code=303)
+
+
+# === Имена из закупок (старая таблица дашборда: имя → телефон) ===
+@app.get("/buyers/names", response_class=HTMLResponse)
 def buyers_list(request: Request, msg: str = ""):
     db = get_db()
     buyers_raw = db.execute("SELECT * FROM buyers ORDER BY name").fetchall()
     buyers = [row_to_dict(b) for b in buyers_raw]
     db.close()
 
-    # Мост «имя → телефон»: тянем получателей из листа, считаем автоподсказку.
-    # Если лист недоступен — страница всё равно работает, просто без подсказок.
-    import buyers_sheet
+    # Мост «имя → телефон»: тянем покупателей из витрины, считаем автоподсказку.
+    # Если витрина недоступна — страница всё равно работает, просто без подсказок.
+    import buyers_store
     pick_options, sheet_error = [], None
     try:
-        recipients = buyers_sheet.list_recipients()
-        pick_options = buyers_sheet.picker_options(recipients)
+        recipients = buyers_store.list_recipients()
+        pick_options = buyers_store.picker_options(recipients)
         for b in buyers:
-            b["linked_phone"] = buyers_sheet.normalize_phone(b.get("phone") or "")
+            b["linked_phone"] = buyers_store.normalize_phone(b.get("phone") or "")
             b["suggested_phone"] = (
                 "" if b["linked_phone"]
-                else buyers_sheet.suggest_phone(b.get("name") or "", recipients)
+                else buyers_store.suggest_phone(b.get("name") or "", recipients)
             )
     except Exception as e:
         sheet_error = str(e)
@@ -1250,7 +1369,7 @@ def buyers_list(request: Request, msg: str = ""):
             b["linked_phone"] = (b.get("phone") or "")
             b["suggested_phone"] = ""
 
-    return templates.TemplateResponse("buyers.html", {
+    return templates.TemplateResponse("buyer_names.html", {
         "request": request,
         "buyers": buyers,
         "pick_options": pick_options,
@@ -1262,34 +1381,34 @@ def buyers_list(request: Request, msg: str = ""):
 @app.post("/buyers/link")
 def link_buyer_phone(buyer_id: int = Form(...), phone: str = Form("")):
     """Привязать покупателя дашборда к телефону получателя (канон 7XXXXXXXXXX)."""
-    import buyers_sheet
-    canon = buyers_sheet.normalize_phone(phone) if phone.strip() else ""
+    import buyers_store
+    canon = buyers_store.normalize_phone(phone) if phone.strip() else ""
     db = get_db()
     db.execute("UPDATE buyers SET phone = ? WHERE id = ?", (canon, buyer_id))
     db.commit()
     db.close()
-    return RedirectResponse(url="/buyers", status_code=303)
+    return RedirectResponse(url="/buyers/names", status_code=303)
 
 
 @app.post("/buyers/autolink")
 def buyers_autolink():
     """Массово проставить телефон покупателям, у кого он есть в имени («79… - Имя»).
     Уже привязанных не трогаем."""
-    import buyers_sheet
+    import buyers_store
     from urllib.parse import quote
     db = get_db()
     linked = 0
     for b in db.execute("SELECT id, name, phone FROM buyers").fetchall():
-        if buyers_sheet.normalize_phone(b["phone"] or ""):
+        if buyers_store.normalize_phone(b["phone"] or ""):
             continue  # уже привязан вручную
-        ph = buyers_sheet.phone_from_name(b["name"] or "")
+        ph = buyers_store.phone_from_name(b["name"] or "")
         if ph:
             db.execute("UPDATE buyers SET phone = ? WHERE id = ?", (ph, b["id"]))
             linked += 1
     db.commit()
     db.close()
     return RedirectResponse(
-        url=f"/buyers?msg={quote(f'Привязано по телефону из имени: {linked}')}",
+        url=f"/buyers/names?msg={quote(f'Привязано по телефону из имени: {linked}')}",
         status_code=303,
     )
 
@@ -1317,7 +1436,7 @@ async def add_buyer(
         )
         db.commit()
     db.close()
-    return RedirectResponse(url="/buyers", status_code=303)
+    return RedirectResponse(url="/buyers/names", status_code=303)
 
 
 @app.post("/buyers/edit/{buyer_id}")
@@ -1335,7 +1454,7 @@ async def edit_buyer(
     )
     db.commit()
     db.close()
-    return RedirectResponse(url="/buyers", status_code=303)
+    return RedirectResponse(url="/buyers/names", status_code=303)
 
 
 @app.post("/buyers/delete-bulk")
@@ -1362,7 +1481,7 @@ def delete_buyers_bulk(ids: List[int] = Form(default=[])):
     msg = f"Удалено: {deleted}."
     if kept:
         msg += f" Не тронуты (есть в активной закупке): {kept}."
-    return RedirectResponse(url=f"/buyers?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(url=f"/buyers/names?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/buyers/delete/{buyer_id}")
@@ -1375,13 +1494,13 @@ async def delete_buyer(buyer_id: int):
     db.execute("DELETE FROM buyers WHERE id = ?", (buyer_id,))
     db.commit()
     db.close()
-    return RedirectResponse(url="/buyers", status_code=303)
+    return RedirectResponse(url="/buyers/names", status_code=303)
 
 
-# === Доставки (Яндекс): получатели из листа «Покупатели» + выбор ПВЗ ===
+# === Доставки (Яндекс): получатели из витрины + выбор ПВЗ ===
 # Хендлеры СИНХРОННЫЕ (def): чтение гуглшита и запросы к Яндексу блокирующие и
 # небыстрые — FastAPI выполнит их в пуле потоков, не блокируя остальные запросы.
-import buyers_sheet
+import buyers_store
 from yandex_delivery import YandexDeliveryClient
 from yandex_delivery.errors import YandexDeliveryError
 from cdek_delivery import CdekClient
@@ -1400,11 +1519,11 @@ def dostavka_list(request: Request):
     error = None
     recipients = []
     try:
-        recipients = buyers_sheet.list_recipients()
+        recipients = buyers_store.list_recipients()
     except FileNotFoundError as e:
         error = f"Не найден ключ сервисного аккаунта: {e}"
     except Exception as e:
-        error = f"Не удалось прочитать лист «Покупатели»: {e}"
+        error = f"Не удалось получить покупателей из витрины: {e}"
     ready = sum(1 for r in recipients if r["delivery_ready"])
     return templates.TemplateResponse("dostavka.html", {
         "request": request,
@@ -1455,21 +1574,26 @@ def dostavka_set_fio(
     city: str = Form(""),
 ):
     try:
-        res = buyers_sheet.set_fio(phone, last_name, first_name, patronymic)
+        res = buyers_store.set_fio(phone, last_name, first_name, patronymic)
         if not res.get("ok"):
             return _op_msg(f"Не удалось записать ФИО: «{res.get('reason')}» "
-                          f"(телефон {phone or '—'} не найден в листе «Покупатели»).")
+                          f"(телефон {phone or '—'} нет среди покупателей витрины).")
         if city.strip():
-            buyers_sheet.set_city(phone, city.strip())
+            buyers_store.set_city(phone, city.strip())
     except Exception as e:
-        return _op_msg(f"Ошибка записи ФИО в лист: {e}")
+        return _op_msg(f"Ошибка записи ФИО: {e}")
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
 @app.get("/dostavka/pvz")
-def dostavka_pvz_search(city: str = "", limit: int = 40, dropoff: int = 0, carrier: str = "yandex"):
-    """JSON-поиск ПВЗ отправления по городу (для пикера точки А).
-    dropoff=1 — только точки приёма посылок. carrier=yandex|cdek."""
+def dostavka_pvz_search(city: str = "", limit: int = 40, dropoff: int = 0, carrier: str = "yandex",
+                        receive: int = 0):
+    """JSON-поиск ПВЗ по городу. carrier=yandex|cdek.
+    dropoff=1 — точки приёма посылок (ПВЗ отправления, точка А);
+    receive=1 — пункты выдачи для девочки, тот же список, что она видит на витрине
+    (если доставку оплачивает получатель — только пункты с оплатой при получении)."""
+    import carriers
+    cod = bool(receive) and carriers.paid_by(carrier=("cdek" if carrier == "cdek" else "yandex")) == "recipient"
     city = (city or "").strip()
     if not city:
         return JSONResponse({"ok": False, "error": "Укажите город"})
@@ -1480,7 +1604,12 @@ def dostavka_pvz_search(city: str = "", limit: int = 40, dropoff: int = 0, carri
             if not code:
                 return JSONResponse({"ok": False, "error": "Город не найден"})
             # для отправления — точки ПРИЁМА (is_reception)
-            pts = c.list_pickup_points(city_code=code, is_reception=bool(dropoff) or None, size=300)
+            if receive:
+                pts = c.list_pickup_points(city_code=code, is_handout=True, size=300)
+                if cod:
+                    pts = [p for p in pts if p.allowed_cod]
+            else:
+                pts = c.list_pickup_points(city_code=code, is_reception=bool(dropoff) or None, size=300)
             data = [{"id": p.code, "name": p.name or "ПВЗ", "address": p.address_full} for p in pts[:limit]]
             return JSONResponse({"ok": True, "env": c.env, "count": len(pts), "points": data})
         c = YandexDeliveryClient()
@@ -1490,6 +1619,8 @@ def dostavka_pvz_search(city: str = "", limit: int = 40, dropoff: int = 0, carri
         # стороне: Яндекс на параметр available_for_dropoff отвечает 400.
         if dropoff:
             points = [p for p in points if p.available_for_dropoff]
+        if cod:
+            points = [p for p in points if "card_on_receipt" in (p.payment_methods or [])]
         data = [{"id": p.id, "name": p.name, "address": p.full_address} for p in points[:limit]]
         return JSONResponse({"ok": True, "env": c.env, "count": len(points), "points": data})
     except (YandexDeliveryError, CdekError) as e:
@@ -1505,12 +1636,13 @@ def dostavka_set_pvz(
     pvz_id: str = Form(""),
 ):
     try:
-        res = buyers_sheet.set_pvz(phone, pvz_address, pvz_id)
+        # модалка ищет ПВЗ Яндекса — значит, и перевозчик Яндекс (иначе СДЭК-девочке уйдёт чужой код)
+        res = buyers_store.save_buyer(phone, {"pvz_address": pvz_address, "pvz_id": pvz_id, "carrier": "yandex"})
         if not res.get("ok"):
             return _op_msg(f"Не удалось записать ПВЗ: «{res.get('reason')}» "
-                          f"(телефон {phone or '—'} не найден в листе «Покупатели»).")
+                          f"(телефон {phone or '—'} нет среди покупателей витрины).")
     except Exception as e:
-        return _op_msg(f"Ошибка записи ПВЗ в лист: {e}")
+        return _op_msg(f"Ошибка записи ПВЗ: {e}")
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
@@ -1613,7 +1745,7 @@ def _delivery_block_reason(phone, rec):
     if not phone:
         return "нет привязки телефона (страница «Покупатели»)"
     if rec is None:
-        return "телефон не найден в листе «Покупатели»"
+        return "телефона нет среди покупателей витрины"
     if rec.get("carrier_manual"):
         return f"вручную: {rec['carrier_manual']}"
     if not (rec.get("first_name") or rec.get("last_name")):
@@ -1626,7 +1758,7 @@ def _delivery_block_reason(phone, rec):
 @app.get("/dostavka/zakupka/{zakupka_id}", response_class=HTMLResponse)
 def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     """Превью массовой доставки по закупке: покупатель → телефон → получатель
-    из листа → расчёт посылки (вес/коробка) → готовность. Без вызовов API."""
+    из витрины → расчёт посылки (вес/коробка) → готовность. Без вызовов API."""
     from yandex_delivery import parcel
 
     db = get_db()
@@ -1641,7 +1773,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     ).fetchall()
     phones = {}
     for b in db.execute("SELECT name, phone FROM buyers").fetchall():
-        phones[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
+        phones[b["name"]] = buyers_store.normalize_phone(b["phone"] or "")
     deliveries = {}
     for d in db.execute(
         "SELECT id, phone, status, price, request_id, tracking_url, carrier, cdek_number "
@@ -1659,10 +1791,10 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
                        (zakupka_id,)).fetchall()]
     db.close()
 
-    # получателей из листа читаем ОДИН раз, кладём в словарь по телефону
+    # получателей из витрины читаем ОДИН раз, кладём в словарь по телефону
     recips, sheet_error = {}, None
     try:
-        for r in buyers_sheet.list_recipients():
+        for r in buyers_store.list_recipients():
             recips[r["phone"]] = r
     except Exception as e:
         sheet_error = str(e)
@@ -1673,7 +1805,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
 
     rows = []
     for buyer_name, its in by_buyer.items():
-        phone = phones.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
+        phone = phones.get(buyer_name, "") or buyers_store.phone_from_name(buyer_name)
         rec = recips.get(phone) if phone else None
         lines = [_pline(it) for it in its]
         box_override = get_setting(f"box:{zakupka_id}:{phone}", "") if phone else ""
@@ -1757,14 +1889,14 @@ def dostavka_export(zakupka_id: int):
         "SELECT buyer_name, aroma_name, volume_ml, total_sum, COALESCE(is_piece, 0) AS is_piece "
         "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name", (zakupka_id,),
     ).fetchall()
-    phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
+    phone_by_name = {b["name"]: buyers_store.normalize_phone(b["phone"] or "")
                      for b in db.execute("SELECT name, phone FROM buyers").fetchall()}
 
     by_buyer = {}
     for it in items:
         by_buyer.setdefault(it["buyer_name"], []).append(it)
     try:
-        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+        recips = {r["phone"]: r for r in buyers_store.list_recipients()}
     except Exception:
         recips = {}
 
@@ -1795,7 +1927,7 @@ def dostavka_export(zakupka_id: int):
     n = 0
     for buyer_name, its in by_buyer.items():
         n += 1
-        phone = phone_by_name.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
+        phone = phone_by_name.get(buyer_name, "") or buyers_store.phone_from_name(buyer_name)
         lines = [_pline(it) for it in its]
         box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{phone}", "")) if phone else None
         calc = parcel.calc(lines, barcode=f"X{zakupka_id}-{n}", box=box)
@@ -1839,7 +1971,7 @@ def _zakupka_lines_by_phone(db, zakupka_id):
     from yandex_delivery import parcel
     phone_by_name = {}
     for b in db.execute("SELECT name, phone FROM buyers").fetchall():
-        phone_by_name[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
+        phone_by_name[b["name"]] = buyers_store.normalize_phone(b["phone"] or "")
     items = db.execute(
         "SELECT buyer_name, aroma_name, volume_ml, total_sum, COALESCE(is_piece, 0) AS is_piece "
         "FROM zakaz_items WHERE zakupka_id = ?",
@@ -1848,7 +1980,7 @@ def _zakupka_lines_by_phone(db, zakupka_id):
     out = {}
     for it in items:
         # привязка вручную (buyers.phone) или телефон прямо из имени «7… - Имя»
-        ph = phone_by_name.get(it["buyer_name"], "") or buyers_sheet.phone_from_name(it["buyer_name"])
+        ph = phone_by_name.get(it["buyer_name"], "") or buyers_store.phone_from_name(it["buyer_name"])
         if not ph:
             continue
         lines, _ = out.setdefault(ph, ([], it["buyer_name"]))
@@ -1873,9 +2005,9 @@ def dostavka_create(zakupka_id: int, background: BackgroundTasks, phones: List[s
     if not phones:
         return _back("Не отмечено ни одного получателя.")
     try:
-        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+        recips = {r["phone"]: r for r in buyers_store.list_recipients()}
     except Exception as e:
-        return _back(f"Не удалось прочитать лист «Покупатели»: {e}")
+        return _back(f"Не удалось получить покупателей из витрины: {e}")
 
     origin_y = get_setting("origin_pvz_id", "")
     origin_c = get_setting("origin_cdek_code", "")
@@ -1985,7 +2117,7 @@ def dostavka_create(zakupka_id: int, background: BackgroundTasks, phones: List[s
 
 
 def _sync_sheet_tracking(db, phone):
-    """Синхронизировать колонку N листа: ставим ссылку АКТИВНОЙ (confirmed) доставки
+    """Синхронизировать ссылку отслеживания в витрине: ставим ссылку АКТИВНОЙ (confirmed) доставки
     этого телефона; если активной нет — очищаем (чтобы не висел трек отменённой)."""
     row = db.execute(
         "SELECT tracking_url FROM deliveries WHERE phone = ? AND status = 'confirmed' "
@@ -1993,7 +2125,7 @@ def _sync_sheet_tracking(db, phone):
         (phone,),
     ).fetchone()
     try:
-        buyers_sheet.set_tracking(phone, row["tracking_url"] if row else "")
+        buyers_store.set_tracking(phone, row["tracking_url"] if row else "")
     except Exception:
         pass
 
@@ -2109,7 +2241,7 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
 
     # получатели + позиции нужны СДЭК (реальный заказ строится на этом шаге)
     try:
-        recips = {r["phone"]: r for r in buyers_sheet.list_recipients()}
+        recips = {r["phone"]: r for r in buyers_store.list_recipients()}
     except Exception:
         recips = {}
     lines_by_phone = _zakupka_lines_by_phone(db, zakupka_id)
@@ -2149,9 +2281,9 @@ def dostavka_confirm(zakupka_id: int, phones: List[str] = Form(default=[])):
             )
         db.commit()
         confirmed += 1
-        if track:  # покупатель увидит ссылку в витрине (лист «Покупатели», колонка N)
+        if track:  # покупатель увидит ссылку в витрине 
             try:
-                buyers_sheet.set_tracking(r["phone"], track)
+                buyers_store.set_tracking(r["phone"], track)
             except Exception:
                 pass
     db.close()
@@ -2192,7 +2324,7 @@ def dostavka_refresh_track(delivery_id: int):
     db.close()
     if track:
         try:
-            buyers_sheet.set_tracking(d["phone"], track)
+            buyers_store.set_tracking(d["phone"], track)
         except Exception:
             pass
     return _back("Ссылка отслеживания обновлена." if track
