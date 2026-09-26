@@ -5,10 +5,11 @@
 {% block content %}
 <div class="row mb-3">
   <div class="col">
-    <h2><i class="bi bi-truck"></i> Доставки — получатели и ПВЗ</h2>
+    <h2><i class="bi bi-truck"></i> Доставки — получатели</h2>
     <div class="text-muted small">
       Данные берутся из листа «Покупатели» (aroma_web). Готовы к доставке:
       <strong>{{ ready }}</strong> из {{ total }}.
+      ПВЗ отправления — во вкладке «⚙️ Настройки» закупки.
     </div>
   </div>
 </div>
@@ -32,26 +33,6 @@
   </div>
 </div>
 {% endif %}
-
-<div class="card shadow-sm mb-3">
-  <div class="card-body">
-    <div class="mb-2"><i class="bi bi-geo-alt-fill"></i> <strong>ПВЗ отправления</strong> (точка А) — по каждому перевозчику:</div>
-    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-      <span class="badge" style="background:#fc0;color:#000">Яндекс</span>
-      {% if origin_pvz_address %}<span class="small">{{ origin_pvz_address }}</span>
-      {% else %}<span class="text-muted small">не задан</span>{% endif %}
-      <button class="btn btn-sm btn-outline-primary js-origin" data-carrier="yandex"
-              data-bs-toggle="modal" data-bs-target="#originModal"><i class="bi bi-pencil"></i> Изменить</button>
-    </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
-      <span class="badge bg-success">СДЭК</span>
-      {% if origin_cdek_address %}<span class="small">{{ origin_cdek_address }}</span>
-      {% else %}<span class="text-muted small">не задан</span>{% endif %}
-      <button class="btn btn-sm btn-outline-success js-origin" data-carrier="cdek"
-              data-bs-toggle="modal" data-bs-target="#originModal"><i class="bi bi-pencil"></i> Изменить</button>
-    </div>
-  </div>
-</div>
 
 <div class="card shadow-sm">
   <div class="card-body">
@@ -164,84 +145,10 @@
     </form>
   </div>
 </div>
-<!-- Модалка: ПВЗ отправления (точка А) -->
-<div class="modal fade" id="originModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <form class="modal-content" method="POST" action="/dostavka/origin">
-      <div class="modal-header">
-        <h5 class="modal-title">ПВЗ отправления — <span id="origin-carrier-name">Яндекс</span></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" name="carrier" id="origin-carrier" value="yandex">
-        <input type="hidden" name="pvz_id" id="origin-id">
-        <input type="hidden" name="pvz_address" id="origin-address">
-        <div class="input-group mb-2">
-          <input class="form-control" id="origin-city" placeholder="Город (напр. Москва)">
-          <button class="btn btn-outline-primary" type="button" id="origin-search-btn">
-            <i class="bi bi-search"></i> Найти ПВЗ
-          </button>
-        </div>
-        <div id="origin-hint" class="small text-muted mb-2"></div>
-        <div id="origin-results" class="list-group" style="max-height:340px;overflow:auto"></div>
-      </div>
-      <div class="modal-footer">
-        <span id="origin-chosen" class="me-auto small text-success"></span>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-        <button type="submit" class="btn btn-primary" id="origin-save" disabled>Сохранить</button>
-      </div>
-    </form>
-  </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-// Выбор перевозчика для ПВЗ отправления (кнопки «Изменить» у Яндекс/СДЭК)
-document.querySelectorAll('.js-origin').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var cr = b.dataset.carrier || 'yandex';
-    document.getElementById('origin-carrier').value = cr;
-    document.getElementById('origin-carrier-name').textContent = (cr === 'cdek') ? 'СДЭК' : 'Яндекс';
-    document.getElementById('origin-id').value = '';
-    document.getElementById('origin-address').value = '';
-    document.getElementById('origin-results').innerHTML = '';
-    document.getElementById('origin-chosen').textContent = '';
-    document.getElementById('origin-hint').textContent = '';
-    document.getElementById('origin-save').disabled = true;
-  });
-});
-// Пикер ПВЗ отправления (переиспользует /dostavka/pvz, с учётом перевозчика)
-document.getElementById('origin-search-btn').addEventListener('click', async function () {
-  var city = document.getElementById('origin-city').value.trim();
-  var results = document.getElementById('origin-results');
-  var hint = document.getElementById('origin-hint');
-  var carrier = document.getElementById('origin-carrier').value;
-  if (!city) { hint.textContent = 'Введите город'; return; }
-  hint.textContent = 'Ищу ПВЗ…'; results.innerHTML = '';
-  try {
-    var resp = await fetch('/dostavka/pvz?dropoff=1&carrier=' + carrier + '&city=' + encodeURIComponent(city));
-    var data = await resp.json();
-    if (!data.ok) { hint.textContent = 'Ошибка: ' + (data.error || 'неизвестно'); return; }
-    hint.textContent = 'Найдено точек приёма: ' + data.count + ' (окружение ' + data.env + ').';
-    data.points.forEach(function (p) {
-      var a = document.createElement('button');
-      a.type = 'button';
-      a.className = 'list-group-item list-group-item-action';
-      a.innerHTML = '<strong>' + (p.name || 'ПВЗ') + '</strong><br><small>' + (p.address || '') + '</small>';
-      a.addEventListener('click', function () {
-        document.getElementById('origin-id').value = p.id;
-        document.getElementById('origin-address').value = p.address || p.name || '';
-        document.getElementById('origin-chosen').textContent = 'Выбран: ' + (p.address || p.name);
-        document.getElementById('origin-save').disabled = false;
-        results.querySelectorAll('.active').forEach(function (e) { e.classList.remove('active'); });
-        a.classList.add('active');
-      });
-      results.appendChild(a);
-    });
-  } catch (e) { hint.textContent = 'Сбой запроса: ' + e; }
-});
-</script>
+
 
 <script>
 // ФИО: заполняем модалку из data-атрибутов кнопки

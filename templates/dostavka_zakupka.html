@@ -72,8 +72,8 @@
 
 {% if not origin_pvz_id and not origin_cdek_code %}
 <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i>
-  Не задан <strong>ПВЗ отправления</strong> — задай его на странице
-  <a href="/dostavka">«Доставки»</a> (для Яндекса и/или СДЭК), иначе создать заявки нельзя.</div>
+  Не задан <strong>ПВЗ отправления</strong> — задай его во вкладке
+  <a href="/zakupka/{{ zakupka.id }}#nastroyki">«⚙️ Настройки»</a> (для Яндекса и/или СДЭК), иначе создать заявки нельзя.</div>
 {% endif %}
 
 <form method="POST">
