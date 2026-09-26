@@ -414,7 +414,7 @@
                                     {% if it.source == 'закупка' %}<span class="source-badge source-zakupka">закупка</span>
                                     {% else %}<span class="source-badge source-nalichie">наличие</span>{% endif %}
                                 </span>
-                                <span class="m-row-vol">{{ it.volume_ml }} мл</span>
+                                <span class="m-row-vol">{{ it.volume_ml }} {{ 'шт' if it.is_piece else 'мл' }}</span>
                                 <input type="checkbox" class="m-check" data-kind="upakovka"
                                        data-item-id="{{ it.id }}" data-rozliv="{{ it.rozliv or 0 }}"
                                        data-source="{% if it.source == 'закупка' %}zakupka{% else %}nalichie{% endif %}"

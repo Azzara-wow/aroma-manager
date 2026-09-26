@@ -95,6 +95,7 @@ class ParcelLine:
     volume_ml: int
     count: int
     unit_price: int = 0  # копейки, оценочная стоимость за 1 шт (для billing_details)
+    piece_weight_g: int = 0  # >0 — штучный товар (База): volume_ml = штук, вес = штук × это
 
 
 @dataclass
@@ -125,7 +126,8 @@ def flacon_gross_weight_g(volume_ml: int) -> int:
 
 def parcel_weight_g(lines: List[ParcelLine], include_packaging: bool = True) -> int:
     """Суммарный вес посылки в граммах."""
-    total = sum(flacon_gross_weight_g(l.volume_ml) * l.count for l in lines)
+    total = sum((l.piece_weight_g * l.volume_ml if l.piece_weight_g else flacon_gross_weight_g(l.volume_ml))
+                * l.count for l in lines)
     if include_packaging:
         total += PACKAGING_WEIGHT_G
     return total

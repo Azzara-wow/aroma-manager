@@ -30,6 +30,25 @@
 <div class="alert alert-info small"><i class="bi bi-info-circle"></i> {{ msg }}</div>
 {% endif %}
 
+{% if piece_items %}
+<details class="card shadow-sm mb-3">
+  <summary class="card-body py-2 small">⚖️ <b>Вес штучных товаров</b> (база едет бутылкой, не флаконами):
+    {% for p in piece_items %}{{ p.name }} — {{ p.manual or p.auto }} г{% if not loop.last %}; {% endif %}{% endfor %}</summary>
+  <form method="POST" action="/dostavka/zakupka/{{ zakupka.id }}/piece-weight" class="card-body pt-0">
+    <div class="small text-muted mb-2">Вес ОДНОЙ штуки с бутылкой, в граммах. Пусто — оценка по названию (1 л ≈ 1100 г).</div>
+    {% for p in piece_items %}
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <input type="hidden" name="name" value="{{ p.name }}">
+      <span class="small" style="min-width:220px">{{ p.name }} <span class="text-muted">· заказано {{ p.count }} шт</span></span>
+      <input type="text" inputmode="numeric" name="grams" class="form-control form-control-sm" style="width:100px"
+             value="{{ p.manual or '' }}" placeholder="{{ p.auto }}"> <span class="small">г</span>
+    </div>
+    {% endfor %}
+    <button class="btn btn-sm btn-outline-primary" type="submit">Сохранить вес</button>
+  </form>
+</details>
+{% endif %}
+
 <div class="small mb-2">
   Доставку оплачивает:
   Яндекс —

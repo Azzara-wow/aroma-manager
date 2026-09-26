@@ -136,6 +136,20 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE zakaz_items ADD COLUMN ext_gone INTEGER DEFAULT 0")
 
+    # Штучный товар (База/ММБ): volume_ml = штук, не разливается. Старым — по названию.
+    try:
+        c.execute("SELECT is_piece FROM zakaz_items LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE zakaz_items ADD COLUMN is_piece INTEGER DEFAULT 0")
+    # разметка старых позиций — один раз (отметка в settings), с отдельным commit:
+    # иначе открытая транзакция мешает PRAGMA journal_mode ниже
+    if not c.execute("SELECT 1 FROM settings WHERE key = 'migr:is_piece'").fetchone():
+        for rid, name in c.execute("SELECT id, aroma_name FROM zakaz_items").fetchall():
+            if (name or "").strip().lower().startswith(("база", "ммб")):
+                c.execute("UPDATE zakaz_items SET is_piece = 1 WHERE id = ?", (rid,))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migr:is_piece', '1')")
+        conn.commit()
+
     # Включаем режим WAL — позволяет читать базу во время записи,
     # это заметно снижает шанс блокировок "database is locked"
     c.execute("PRAGMA journal_mode=WAL")

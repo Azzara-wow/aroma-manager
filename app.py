@@ -214,7 +214,7 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             s.rozliv
         FROM zakaz_items zi
         JOIN statuses s ON s.zakaz_item_id = zi.id
-        WHERE zi.zakupka_id = ?
+        WHERE zi.zakupka_id = ? AND COALESCE(zi.is_piece, 0) = 0
         ORDER BY zi.aroma_name, zi.buyer_name
     """, (zakupka_id,)).fetchall()
 
@@ -233,7 +233,8 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             zi.volume_ml,
             'закупка' as source,
             s.upakovka,
-            s.rozliv
+            CASE WHEN COALESCE(zi.is_piece, 0) = 1 THEN 1 ELSE s.rozliv END as rozliv,
+            COALESCE(zi.is_piece, 0) as is_piece
         FROM zakaz_items zi
         JOIN statuses s ON s.zakaz_item_id = zi.id
         WHERE zi.zakupka_id = ?
@@ -247,7 +248,8 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             no.volume_ml,
             'наличие' as source,
             COALESCE(s.upakovka, 0) as upakovka,
-            1 as rozliv
+            1 as rozliv,
+            0 as is_piece
         FROM nalichie_orders no
         LEFT JOIN statuses s ON s.nalichie_order_id = no.id
         WHERE no.zakupka_id = ? OR no.zakupka_id IS NULL
@@ -667,7 +669,8 @@ def rozliv_export(zakupka_id: int):
         raise HTTPException(status_code=404, detail="Закупка не найдена")
     rows = db.execute(
         "SELECT aroma_name, SUM(volume_ml) AS total, COUNT(*) AS cnt "
-        "FROM zakaz_items WHERE zakupka_id = ? GROUP BY aroma_name ORDER BY aroma_name",
+        "FROM zakaz_items WHERE zakupka_id = ? AND COALESCE(is_piece, 0) = 0 "
+        "GROUP BY aroma_name ORDER BY aroma_name",
         (zakupka_id,),
     ).fetchall()
     db.close()
@@ -692,7 +695,8 @@ def upakovka_export(zakupka_id: int):
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
     zk = db.execute(
-        "SELECT buyer_name, aroma_name, volume_ml FROM zakaz_items WHERE zakupka_id = ?",
+        "SELECT buyer_name, aroma_name, volume_ml, COALESCE(is_piece, 0) AS is_piece "
+        "FROM zakaz_items WHERE zakupka_id = ?",
         (zakupka_id,),
     ).fetchall()
     nl = db.execute(
@@ -700,7 +704,8 @@ def upakovka_export(zakupka_id: int):
         "WHERE zakupka_id = ? OR zakupka_id IS NULL", (zakupka_id,),
     ).fetchall()
     db.close()
-    items = [{"buyer": r["buyer_name"], "aroma": r["aroma_name"], "vol": r["volume_ml"], "src": "закупка"} for r in zk]
+    items = [{"buyer": r["buyer_name"], "aroma": r["aroma_name"],
+              "vol": f"{r['volume_ml']} шт" if r["is_piece"] else r["volume_ml"], "src": "закупка"} for r in zk]
     items += [{"buyer": r["buyer_name"], "aroma": r["aroma_name"], "vol": r["volume_ml"], "src": "наличие"} for r in nl]
     items.sort(key=lambda x: (x["buyer"], 0 if x["src"] == "закупка" else 1, x["aroma"]))
 
@@ -918,6 +923,8 @@ def item_add(zakupka_id: int, buyer_name: str = Form(""), aroma_name: str = Form
          int(volume_ml or 0), float(price_per_10ml or 0), float(total_sum or 0)),
     )
     iid = cur.lastrowid
+    import piece
+    db.execute("UPDATE zakaz_items SET is_piece = ? WHERE id = ?", (1 if piece.looks_piece(aroma_name) else 0, iid))
     db.execute("INSERT INTO statuses (zakaz_item_id, rozliv, upakovka, payment_zakupka, shipped) VALUES (?,0,0,0,0)", (iid,))
     bn = buyer_name.strip()
     if bn and not db.execute("SELECT id FROM buyers WHERE name = ?", (bn,)).fetchone():
@@ -932,10 +939,11 @@ def item_edit(zakupka_id: int, item_id: int, buyer_name: str = Form(""), aroma_n
               volume_ml: int = Form(0), price_per_10ml: float = Form(0), total_sum: float = Form(0)):
     db = get_db()
     db.execute(
-        "UPDATE zakaz_items SET buyer_name=?, aroma_name=?, volume_ml=?, price_per_10ml=?, total_sum=? "
+        "UPDATE zakaz_items SET buyer_name=?, aroma_name=?, volume_ml=?, price_per_10ml=?, total_sum=?, is_piece=? "
         "WHERE id=? AND zakupka_id=?",
         (buyer_name.strip(), aroma_name.strip(), int(volume_ml or 0),
-         float(price_per_10ml or 0), float(total_sum or 0), item_id, zakupka_id),
+         float(price_per_10ml or 0), float(total_sum or 0),
+         1 if __import__("piece").looks_piece(aroma_name) else 0, item_id, zakupka_id),
     )
     bn = buyer_name.strip()
     if bn and not db.execute("SELECT id FROM buyers WHERE name = ?", (bn,)).fetchone():
@@ -1325,12 +1333,39 @@ def dostavka_set_pvz(
     return RedirectResponse(url="/dostavka", status_code=303)
 
 
+def _pline(it):
+    """Строка посылки: флакон (мл) или штучный товар (База — вес 1 шт × штук)."""
+    from yandex_delivery import parcel
+    import piece
+    pw = piece.weight_g(it["aroma_name"]) if it["is_piece"] else 0
+    return parcel.ParcelLine(it["aroma_name"], it["volume_ml"], 1,
+                             int(round((it["total_sum"] or 0) * 100)), piece_weight_g=pw)
+
+
+@app.post("/dostavka/zakupka/{zakupka_id}/piece-weight")
+def dostavka_piece_weight(zakupka_id: int, name: List[str] = Form(default=[]),
+                          grams: List[str] = Form(default=[])):
+    """Вес 1 шт штучных товаров (База, ММБ). Пусто — оценка по названию."""
+    from urllib.parse import quote
+    import piece
+    saved = 0
+    for n, g in zip(name, grams):
+        g = (g or "").strip()
+        if g and not g.isdigit():
+            continue
+        piece.set_weight(n, g)
+        saved += 1
+    return RedirectResponse(url=f"/dostavka/zakupka/{zakupka_id}?msg={quote(f'Вес штучных сохранён: {saved}')}",
+                            status_code=303)
+
+
 def _ship_readiness(db, zakupka_id):
     """{buyer_name: {"ready": bool, "wait": [...]}} — можно ли отправлять: всё разлито,
     всё упаковано (закупка + наличие), оплачено (закупка; наличие — если оно есть)."""
     out = {}
     for r in db.execute(
-        "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 THEN 1 ELSE 0 END) AS pour, "
+        "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 AND COALESCE(zi.is_piece,0)=0 "
+        "THEN 1 ELSE 0 END) AS pour, "
         "SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
         "MAX(COALESCE(s.payment_zakupka,0)) AS paid "
         "FROM zakaz_items zi LEFT JOIN statuses s ON s.zakaz_item_id = zi.id "
@@ -1386,7 +1421,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
     items = db.execute(
-        "SELECT buyer_name, aroma_name, volume_ml, total_sum "
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum, COALESCE(is_piece, 0) AS is_piece "
         "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name",
         (zakupka_id,),
     ).fetchall()
@@ -1401,6 +1436,13 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     ).fetchall():
         deliveries[d["phone"]] = row_to_dict(d)
     readiness = _ship_readiness(db, zakupka_id)
+    import piece
+    piece_items = [{"name": r["aroma_name"], "count": r["n"], "manual": piece.manual_weight(r["aroma_name"]),
+                    "auto": piece.default_weight_g(r["aroma_name"])}
+                   for r in db.execute(
+                       "SELECT aroma_name, SUM(volume_ml) AS n FROM zakaz_items "
+                       "WHERE zakupka_id = ? AND COALESCE(is_piece, 0) = 1 GROUP BY aroma_name ORDER BY aroma_name",
+                       (zakupka_id,)).fetchall()]
     db.close()
 
     # получателей из листа читаем ОДИН раз, кладём в словарь по телефону
@@ -1419,13 +1461,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
     for buyer_name, its in by_buyer.items():
         phone = phones.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
         rec = recips.get(phone) if phone else None
-        lines = [
-            parcel.ParcelLine(
-                it["aroma_name"], it["volume_ml"], 1,
-                int(round((it["total_sum"] or 0) * 100)),
-            )
-            for it in its
-        ]
+        lines = [_pline(it) for it in its]
         box_override = get_setting(f"box:{zakupka_id}:{phone}", "") if phone else ""
         calc = parcel.calc(lines, barcode=f"Z{zakupka_id}-{phone or buyer_name}",
                            box=parcel.get_supplier_box(box_override))
@@ -1468,6 +1504,7 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
         "origin_cdek_code": get_setting("origin_cdek_code", ""),
         "origin_cdek_address": get_setting("origin_cdek_address", ""),
         "confirmed_carriers": confirmed_carriers,
+        "piece_items": piece_items,
         "paid_by_yandex": __import__("carriers").paid_by(carrier="yandex"),
         "paid_by_cdek": __import__("carriers").paid_by(carrier="cdek"),
         "supplier_boxes": [{"code": b.code, "name": b.name} for b in parcel.SUPPLIER_BOXES],
@@ -1490,7 +1527,7 @@ def dostavka_export(zakupka_id: int):
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
     items = db.execute(
-        "SELECT buyer_name, aroma_name, volume_ml, total_sum "
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum, COALESCE(is_piece, 0) AS is_piece "
         "FROM zakaz_items WHERE zakupka_id = ? ORDER BY buyer_name", (zakupka_id,),
     ).fetchall()
     phone_by_name = {b["name"]: buyers_sheet.normalize_phone(b["phone"] or "")
@@ -1532,11 +1569,10 @@ def dostavka_export(zakupka_id: int):
     for buyer_name, its in by_buyer.items():
         n += 1
         phone = phone_by_name.get(buyer_name, "") or buyers_sheet.phone_from_name(buyer_name)
-        lines = [parcel.ParcelLine(it["aroma_name"], it["volume_ml"], 1,
-                                   int(round((it["total_sum"] or 0) * 100))) for it in its]
+        lines = [_pline(it) for it in its]
         box = parcel.get_supplier_box(get_setting(f"box:{zakupka_id}:{phone}", "")) if phone else None
         calc = parcel.calc(lines, barcode=f"X{zakupka_id}-{n}", box=box)
-        contents = "; ".join(f"{it['aroma_name']} ×{it['volume_ml']}мл" for it in its)
+        contents = "; ".join(f"{it['aroma_name']} ×{it['volume_ml']}{' шт' if it['is_piece'] else 'мл'}" for it in its)
         ws.append([n, buyer_name, _how(recips.get(phone)), contents, len(its), calc.weight_g,
                    calc.box.name, calc.yandex_ref.code if calc.yandex_ref else "", "", ""])
         for c in ws[ws.max_row]:
@@ -1578,7 +1614,8 @@ def _zakupka_lines_by_phone(db, zakupka_id):
     for b in db.execute("SELECT name, phone FROM buyers").fetchall():
         phone_by_name[b["name"]] = buyers_sheet.normalize_phone(b["phone"] or "")
     items = db.execute(
-        "SELECT buyer_name, aroma_name, volume_ml, total_sum FROM zakaz_items WHERE zakupka_id = ?",
+        "SELECT buyer_name, aroma_name, volume_ml, total_sum, COALESCE(is_piece, 0) AS is_piece "
+        "FROM zakaz_items WHERE zakupka_id = ?",
         (zakupka_id,),
     ).fetchall()
     out = {}
@@ -1588,9 +1625,7 @@ def _zakupka_lines_by_phone(db, zakupka_id):
         if not ph:
             continue
         lines, _ = out.setdefault(ph, ([], it["buyer_name"]))
-        lines.append(parcel.ParcelLine(
-            it["aroma_name"], it["volume_ml"], 1, int(round((it["total_sum"] or 0) * 100))
-        ))
+        lines.append(_pline(it))
     return out
 
 

@@ -18,6 +18,7 @@ import os
 import requests
 
 import buyers_sheet
+from piece import looks_piece
 
 VITRINA_URL = os.environ.get("AROMA_WEB_URL", "http://127.0.0.1:8001").rstrip("/")
 
@@ -66,7 +67,8 @@ def compute_diff(db, zakupka_id, rows):
     """Сравнить позиции закупки с витриной. Ничего не пишет."""
     items = db.execute(
         "SELECT z.id, z.buyer_name, z.aroma_name, z.volume_ml, z.price_per_10ml, z.total_sum, "
-        "COALESCE(z.ext_gone, 0) AS ext_gone, COALESCE(s.rozliv, 0) AS rozliv "
+        "COALESCE(z.ext_gone, 0) AS ext_gone, COALESCE(s.rozliv, 0) AS rozliv, "
+        "COALESCE(z.is_piece, 0) AS is_piece "
         "FROM zakaz_items z LEFT JOIN statuses s ON s.zakaz_item_id = z.id "
         "WHERE z.zakupka_id = ?", (zakupka_id,)).fetchall()
 
@@ -80,18 +82,22 @@ def compute_diff(db, zakupka_id, rows):
         by_key.setdefault(k, []).append(it)
         name_by_phone.setdefault(k.split("|")[0], it["buyer_name"])
 
-    added, changed, removed, kept = [], [], [], []
+    added, changed, removed, kept, piece_fix = [], [], [], [], []
     unchanged = 0
     seen = set()
     for r in rows:
         k = key_of(r["phone"], r["aroma"])
         seen.add(k)
         vol, price, amount = int(r["volume"]), float(r["per_ml"]), float(r["amount"])
+        piece = 1 if (r.get("piece") or looks_piece(r["aroma"])) else 0
         its = by_key.get(k)
         if not its:
             added.append({"buyer": name_by_phone.get(r["phone"]) or buyer_label(r),
-                          "aroma": r["aroma"], "volume": vol, "price": price, "amount": amount})
+                          "aroma": r["aroma"], "volume": vol, "price": price, "amount": amount,
+                          "piece": piece})
             continue
+        # признак «штучный» — молча выравниваем по витрине (не считаем изменением)
+        piece_fix += [(x["id"], piece) for x in its if x["is_piece"] != piece]
         # пара может быть разбита на несколько строк (правили руками) — сравниваем итог
         it = its[0]
         old_vol = sum(x["volume_ml"] or 0 for x in its)
@@ -121,16 +127,16 @@ def compute_diff(db, zakupka_id, rows):
                 removed.append(rec)
 
     return {"added": added, "changed": changed, "removed": removed, "kept": kept,
-            "unchanged": unchanged, "manual": manual}
+            "unchanged": unchanged, "manual": manual, "piece_fix": piece_fix}
 
 
 def apply_diff(db, zakupka_id, diff):
     """Применить разницу (commit — на вызывающем)."""
     for a in diff["added"]:
         cur = db.execute(
-            "INSERT INTO zakaz_items (zakupka_id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (zakupka_id, a["buyer"], a["aroma"], a["volume"], a["price"], a["amount"]))
+            "INSERT INTO zakaz_items (zakupka_id, buyer_name, aroma_name, volume_ml, price_per_10ml, total_sum, is_piece) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (zakupka_id, a["buyer"], a["aroma"], a["volume"], a["price"], a["amount"], a.get("piece", 0)))
         db.execute("INSERT INTO statuses (zakaz_item_id, rozliv, upakovka, payment_zakupka, shipped) "
                    "VALUES (?, 0, 0, 0, 0)", (cur.lastrowid,))
         if not db.execute("SELECT id FROM buyers WHERE name = ?", (a["buyer"],)).fetchone():
@@ -146,3 +152,5 @@ def apply_diff(db, zakupka_id, diff):
         db.execute("DELETE FROM zakaz_items WHERE id = ?", (r["id"],))
     for r in diff["kept"]:
         db.execute("UPDATE zakaz_items SET ext_gone = 1 WHERE id = ?", (r["id"],))
+    for iid, piece in diff.get("piece_fix", []):
+        db.execute("UPDATE zakaz_items SET is_piece = ? WHERE id = ?", (piece, iid))
