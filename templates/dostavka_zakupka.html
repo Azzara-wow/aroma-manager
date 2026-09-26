@@ -7,7 +7,46 @@
 <style>.who-phone{ color:#9aa3ad; font-size:.78em; font-weight:400; white-space:nowrap; }
 .ship-ok{ display:inline-block; margin-top:3px; padding:1px 8px; border-radius:999px; font-size:.75rem;
           font-weight:600; color:#1e6b34; background:#e3f4e7; white-space:nowrap; }
-.ship-wait{ margin-top:3px; font-size:.75rem; color:#8a939c; }</style>
+.ship-wait{ margin-top:3px; font-size:.75rem; color:#8a939c; }
+/* --- карточки доставки (телефон) --- */
+.dv-chips{ display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:6px; scrollbar-width:none; }
+.dv-chip{ flex:0 0 auto; border:1px solid #d0d5dd; background:#fff; border-radius:999px; padding:5px 11px; font-size:.85rem; }
+.dv-chip.active{ background:#344054; border-color:#344054; color:#fff; }
+.dv-chip:disabled{ opacity:.35; }
+.dv-sec{ margin-bottom:14px; }
+.dv-sec-h{ font-weight:700; font-size:.95rem; margin:4px 2px 8px; }
+.dv-sec-h span{ color:#98a2b3; font-weight:500; margin-left:4px; }
+.dv-card{ background:#fff; border:1px solid #e6e8ec; border-left:4px solid #cbd5e1; border-radius:12px;
+          padding:10px 12px; margin-bottom:8px; }
+.dv-card.dv-ship{ border-left-color:#16a34a; background:#f3fbf5; }
+.dv-card.dv-pack{ border-left-color:#7c3aed; }
+.dv-card.dv-pour{ border-left-color:#f59e0b; }
+.dv-card.dv-pay { border-left-color:#0ea5e9; }
+.dv-card.dv-sent{ border-left-color:#94a3b8; opacity:.8; }
+.dv-top{ display:flex; align-items:center; gap:6px; }
+.dv-name{ font-weight:700; flex:1 1 auto; min-width:0; }
+.dv-w{ color:#667085; font-size:.8rem; white-space:nowrap; }
+.dv-addr{ font-size:.78rem; color:#667085; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dv-addr.dv-bad{ color:#dc2626; white-space:normal; }
+.dv-need{ margin-top:6px; }
+.dv-n{ font-size:.82rem; color:#344054; padding:1px 0; }
+.dv-n-pour{ color:#b45309; }
+.dv-n-ok{ color:#15803d; font-weight:600; }
+.dv-bottom{ display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.dv-box{ width:auto; max-width:140px; font-size:.8rem; }
+.dv-pick{ margin-left:auto; font-size:.85rem; display:flex; align-items:center; gap:5px; }
+.dv-pick.off{ color:#98a2b3; }
+.dv-chip.dv-ship.active{ background:#16a34a; border-color:#16a34a; }
+.dv-chip.dv-pour.active{ background:#f59e0b; border-color:#f59e0b; }
+.dv-chip.dv-pack.active{ background:#7c3aed; border-color:#7c3aed; }
+.dv-chip.dv-pay.active { background:#0ea5e9; border-color:#0ea5e9; }
+.dv-cards{ padding-bottom:64px; }            /* место под нижнюю плашку */
+.dv-bar{ position:fixed; left:0; right:0; bottom:0; z-index:20; display:flex; gap:6px; align-items:center;
+         padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:#fff;
+         border-top:1px solid #e6e8ec; box-shadow:0 -4px 14px rgba(0,0,0,.06); overflow-x:auto; }
+.dv-bar .btn{ flex:0 0 auto; }
+.dv-bar-n{ margin-left:auto; font-size:.8rem; color:#667085; white-space:nowrap; }
+</style>
 <div class="mb-3">
     <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Назад</a>
     <h2 class="d-inline ms-3">{{ zakupka.name }}</h2>
@@ -15,7 +54,7 @@
     {% else %}<span class="badge bg-secondary ms-2">Архив</span>{% endif %}
 </div>
 {% with current='dostavka' %}{% include 'partials/zakupka_tabs.html' %}{% endwith %}
-<div class="text-muted small mb-3">
+<div class="text-muted small mb-3 d-none d-md-block">
   Готовы к отправке: <strong>{{ ready_count }}</strong> из {{ total }}.
   Посылка: вес = флаконы + содержимое + упаковка; коробка подобрана по весу.
   {% if is_admin(request) %}<a href="/dostavka" class="ms-2">Все получатели и ПВЗ отправления →</a>{% endif %}
@@ -31,7 +70,7 @@
 {% endif %}
 
 {% if piece_items %}
-<details class="card shadow-sm mb-3">
+<details class="card shadow-sm mb-3 d-none d-md-block">
   <summary class="card-body py-2 small">⚖️ <b>Вес штучных товаров</b> (база едет бутылкой, не флаконами):
     {% for p in piece_items %}{{ p.name }} — {{ p.manual or p.auto }} г{% if not loop.last %}; {% endif %}{% endfor %}</summary>
   <form method="POST" action="/dostavka/zakupka/{{ zakupka.id }}/piece-weight" class="card-body pt-0">
@@ -49,7 +88,7 @@
 </details>
 {% endif %}
 
-<div class="small mb-2">
+<div class="small mb-2 d-none d-md-block">
   Доставку оплачивает:
   Яндекс —
   {% if paid_by_yandex == 'recipient' %}<span class="badge bg-warning text-dark">покупатель (наложенный платёж на ПВЗ)</span>
@@ -64,14 +103,14 @@
   Не задан <strong>ПВЗ отправления</strong> — задай его на странице
   <a href="/dostavka">«Доставки»</a> (для Яндекса и/или СДЭК), иначе создать заявки нельзя.</div>
 {% else %}
-<div class="text-muted small mb-2"><i class="bi bi-geo-alt-fill"></i> Отправление —
+<div class="text-muted small mb-2 d-none d-md-block"><i class="bi bi-geo-alt-fill"></i> Отправление —
   {% if origin_pvz_address %}Яндекс: {{ origin_pvz_address }}{% endif %}
   {% if origin_cdek_address %}{% if origin_pvz_address %} · {% endif %}СДЭК: {{ origin_cdek_address }}{% endif %}
 </div>
 {% endif %}
 
 <form method="POST">
-<div class="card shadow-sm mb-3">
+<div class="card shadow-sm mb-3 d-none d-md-block">
   <div class="card-body d-flex align-items-center gap-2 flex-wrap">
     <button class="btn btn-primary" formaction="/dostavka/zakupka/{{ zakupka.id }}/create"
             {{ 'disabled' if not (origin_pvz_id or origin_cdek_code) else '' }}>
@@ -98,7 +137,82 @@
   </div>
 </div>
 
-<div class="card shadow-sm">
+{# ===== ТЕЛЕФОН: карточки по оперативному статусу (что отправить, что долить) ===== #}
+{% set STAGES = [('ship', '🚀', 'Можно отправлять'), ('pack', '📦', 'Упаковать'), ('pour', '🧪', 'Долить'),
+                 ('pay', '💳', 'Ждёт оплаты'), ('sent', '✅', 'Отправлено')] %}
+{% if rows %}
+<div class="d-md-none dv-cards">
+  <div class="dv-chips">
+    <button type="button" class="dv-chip active" data-f="all">Все <b>{{ rows|length }}</b></button>
+    {% for key, ico, label in STAGES %}
+    {% set n = rows|selectattr('stage', 'equalto', key)|list|length %}
+    <button type="button" class="dv-chip dv-{{ key }}" data-f="{{ key }}" {{ 'disabled' if not n }}>{{ ico }} <b>{{ n }}</b></button>
+    {% endfor %}
+  </div>
+  {% for key, ico, label in STAGES %}
+  {% set grp = rows|selectattr('stage', 'equalto', key)|list %}
+  {% if grp %}
+  <div class="dv-sec" data-stage="{{ key }}">
+    <div class="dv-sec-h">{{ ico }} {{ label }} <span>{{ grp|length }}</span></div>
+    {% for r in grp %}
+    <div class="dv-card dv-{{ key }}">
+      <div class="dv-top">
+        <span class="dv-name">{{ who(r.buyer_name) }}</span>
+        {% if r.carrier == 'cdek' %}<span class="badge bg-success">СДЭК</span>
+        {% elif r.carrier == 'yandex' %}<span class="badge" style="background:#fc0;color:#000">Яндекс</span>
+        {% elif r.carrier_manual %}<span class="badge bg-info text-dark">✋ {{ r.carrier_manual }}</span>{% endif %}
+        <span class="dv-w">{{ '%.1f'|format(r.weight_g / 1000) }} кг</span>
+      </div>
+      {% if r.pvz_address %}<div class="dv-addr">{{ r.pvz_address }}</div>
+      {% elif not r.ready and r.reason %}<div class="dv-addr dv-bad">⚠ {{ r.reason }}</div>{% endif %}
+
+      <div class="dv-need">
+        {% if r.ship.pour %}
+        <div class="dv-n dv-n-pour">🧪 долить {{ r.ship.pour }}:
+          {{ r.ship.pour_list[:3]|join(' · ') }}{% if r.ship.pour_list|length > 3 %} · ещё {{ r.ship.pour_list|length - 3 }}{% endif %}</div>
+        {% endif %}
+        {% if r.ship.pack %}<div class="dv-n">📦 упаковать {{ r.ship.pack }} поз.</div>{% endif %}
+        {% if not r.ship.paid %}<div class="dv-n">💳 не оплачено</div>{% endif %}
+        {% if key == 'ship' %}<div class="dv-n dv-n-ok">всё разлито, упаковано и оплачено</div>{% endif %}
+      </div>
+
+      <div class="dv-bottom">
+        {% if r.delivery and r.delivery.status in ('confirmed', 'labeled') %}
+          <span class="badge bg-success">бронь</span>
+          {% if r.delivery.tracking_url %}<a class="btn btn-sm btn-outline-primary py-0" href="{{ r.delivery.tracking_url }}" target="_blank" rel="noopener">Отследить</a>{% endif %}
+        {% elif r.delivery and r.delivery.status == 'offered' %}
+          <span class="badge bg-warning text-dark">черновик {{ r.delivery.price }}</span>
+        {% endif %}
+        {% if r.phone %}
+        <select class="form-select form-select-sm js-box dv-box" data-phone="{{ r.phone }}" title="Коробка">
+          {% for b in supplier_boxes %}<option value="{{ b.code }}" {{ 'selected' if b.code == r.box else '' }}>{{ b.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <label class="dv-pick {{ '' if r.ready else 'off' }}">
+          <input type="checkbox" class="form-check-input dv-pickbox" data-phone="{{ r.phone }}"
+                 {{ 'checked' if r.ready and key == 'ship' else '' }} {{ '' if r.ready else 'disabled' }}> выбрать
+        </label>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+  <div class="dv-bar">
+    <button class="btn btn-primary btn-sm" formaction="/dostavka/zakupka/{{ zakupka.id }}/create"
+            {{ 'disabled' if not (origin_pvz_id or origin_cdek_code) else '' }}>① Создать</button>
+    <button class="btn btn-success btn-sm" formaction="/dostavka/zakupka/{{ zakupka.id }}/confirm"
+            onclick="return confirm('Подтвердить отмеченные? Это РЕАЛЬНАЯ бронь доставки у перевозчика.')">② Подтвердить</button>
+    {% for cr in confirmed_carriers %}
+    <a class="btn btn-outline-dark btn-sm" target="_blank" href="/dostavka/zakupka/{{ zakupka.id }}/labels?carrier={{ cr }}">③ Ярлыки</a>
+    {% endfor %}
+    <a class="btn btn-outline-success btn-sm" href="/dostavka/zakupka/{{ zakupka.id }}/export">Excel</a>
+    <span class="dv-bar-n">выбрано <b id="dv-picked">0</b></span>
+  </div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm d-none d-md-block">
   <div class="card-body">
     {% if rows %}
     <div class="table-responsive">
@@ -216,5 +330,30 @@ document.querySelectorAll('.js-box').forEach(function (sel) {
       .finally(function () { sel.disabled = false; });
   });
 });
+</script>
+
+<script>
+(function () {
+  const wrap = document.querySelector('.dv-cards');
+  if (!wrap || getComputedStyle(wrap).display === 'none') return;   // на широком экране — таблица как была
+  wrap.querySelectorAll('.dv-chip').forEach(function (ch) {
+    ch.addEventListener('click', function () {
+      wrap.querySelectorAll('.dv-chip').forEach(x => x.classList.remove('active'));
+      ch.classList.add('active');
+      const f = ch.dataset.f;
+      wrap.querySelectorAll('.dv-sec').forEach(sec => { sec.hidden = !(f === 'all' || sec.dataset.stage === f); });
+    });
+  });
+  // «выбрать» в карточке = галочка в таблице (именно она уходит в форму «Создать/Подтвердить»)
+  function twin(phone) { return document.querySelector('input[name="phones"][value="' + phone + '"]'); }
+  const picked = document.getElementById('dv-picked');
+  function count() { if (picked) picked.textContent = wrap.querySelectorAll('.dv-pickbox:checked').length; }
+  wrap.querySelectorAll('.dv-pickbox').forEach(function (cb) {
+    const t = twin(cb.dataset.phone);
+    if (t) t.checked = cb.checked;
+    cb.addEventListener('change', function () { const t = twin(cb.dataset.phone); if (t) t.checked = cb.checked; count(); });
+  });
+  count();
+})();
 </script>
 {% endblock %}

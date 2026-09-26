@@ -1541,7 +1541,17 @@ def _ship_readiness(db, zakupka_id):
         d = out.setdefault(r["buyer_name"], {"pour": 0, "pack": 0, "paid": True})
         d["pack"] += r["pack"] or 0
         d["paid"] = d["paid"] and bool(r["paid"])
+    for r in db.execute(
+        "SELECT zi.buyer_name, zi.aroma_name, zi.volume_ml, COALESCE(zi.is_piece, 0) AS piece "
+        "FROM zakaz_items zi LEFT JOIN statuses s ON s.zakaz_item_id = zi.id "
+        "WHERE zi.zakupka_id = ? AND COALESCE(s.rozliv, 0) = 0 ORDER BY zi.aroma_name", (zakupka_id,),
+    ).fetchall():
+        d = out.get(r["buyer_name"])
+        if d is not None:
+            d.setdefault("pour_list", []).append(
+                f"{r['aroma_name']} {r['volume_ml']} {'шт' if r['piece'] else 'мл'}")
     for d in out.values():
+        d.setdefault("pour_list", [])
         wait = []
         if d["pour"]:
             wait.append(f"розлив {d['pour']}")
@@ -1633,7 +1643,8 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "pvz_address": rec["pvz_address"] if rec else "",
             "carrier": (rec.get("carrier") if rec else ""),  # пусто, пока покупатель не выбрал ТК
             "carrier_manual": (rec.get("carrier_manual") if rec else ""),
-            "ship": readiness.get(buyer_name, {"ready": False, "wait": []}),
+            "ship": readiness.get(buyer_name, {"ready": False, "wait": [], "pour": 0, "pack": 0,
+                                               "paid": False, "pour_list": []}),
             "positions": len(its),
             "weight_g": calc.weight_g,
             "box": calc.box.code,                         # выбранная коробка поставщика
@@ -1644,6 +1655,18 @@ def dostavka_zakupka(request: Request, zakupka_id: int, msg: str = ""):
             "reason": reason,
             "delivery": deliveries.get(phone),
         })
+    for r in rows:
+        sh, dl = r["ship"], r["delivery"] or {}
+        if dl.get("status") in ("confirmed", "labeled"):
+            r["stage"] = "sent"
+        elif sh.get("pour"):
+            r["stage"] = "pour"
+        elif sh.get("pack"):
+            r["stage"] = "pack"
+        elif not sh.get("paid"):
+            r["stage"] = "pay"
+        else:
+            r["stage"] = "ship"
     rows.sort(key=lambda x: (not x["ready"], x["buyer_name"].lower()))
     ready_count = sum(1 for r in rows if r["ready"])
     # перевозчики среди подтверждённых — для кнопок печати ярлыков по каждому
