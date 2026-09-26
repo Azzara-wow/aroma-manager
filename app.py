@@ -40,6 +40,13 @@ async def require_login(request: Request, call_next):
     path = request.url.path
     if path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX) or request.method == "OPTIONS":
         return await call_next(request)
+    if not dash_auth.enabled():            # вход выключен — как раньше, все организаторы
+        if path.startswith("/users"):      # но учётки заводить нельзя, пока дверь открыта
+            return HTMLResponse("<div style='font-family:system-ui;padding:40px;text-align:center'>"
+                                "<h3>Вход сейчас выключен</h3><p>Пользователи настраиваются после включения входа.</p>"
+                                "<p><a href='/'>← На главную</a></p></div>", status_code=403)
+        request.state.user = dash_auth.GUEST_ADMIN
+        return await call_next(request)
     from urllib.parse import quote
     user = dash_auth.user_from_cookie(request.cookies.get(dash_auth.COOKIE, ""))
     wants_html = request.method in ("GET", "HEAD") and not path.startswith("/api/")

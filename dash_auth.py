@@ -247,11 +247,30 @@ def allowed(user, method, path):
     return any(m == method and rx.match(path) for m, rx in _SUPPLIER_RE)
 
 
+# ---------------- выключатель входа ----------------
+# Пока идёт оперативная работа, вход можно выключить: дашборд открыт как раньше,
+# все действуют как организатор. Включить/выключить: python dash_auth.py on|off
+
+GUEST_ADMIN = {"id": 0, "login": "", "name": "", "role": ROLE_ADMIN, "pass_hash": ""}
+
+
+def enabled():
+    return get_setting("auth:enabled", "") == "1"
+
+
+def set_enabled(on):
+    set_setting("auth:enabled", "1" if on else "")
+
+
 # ---------------- CLI на сервере ----------------
 
 if __name__ == "__main__":
     init()
-    if len(sys.argv) > 1 and sys.argv[1] == "setup-code":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "setup-code":
         print(new_setup_code())
+    elif cmd in ("on", "off"):
+        set_enabled(cmd == "on")
+        print("вход ВКЛЮЧЁН" if enabled() else "вход выключен — дашборд открыт")
     else:
-        print("Использование: python dash_auth.py setup-code")
+        print("Использование: python dash_auth.py setup-code | on | off")
