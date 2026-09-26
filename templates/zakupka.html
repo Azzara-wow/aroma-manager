@@ -191,7 +191,7 @@
     {% endif %}
     {% if zakupka.status == 'active' and is_admin(request) %}
     <button type="button" class="btn btn-success btn-sm ms-2" id="sync-open">
-        <i class="bi bi-arrow-repeat"></i> Обновить из витрины
+        <i class="bi bi-cloud-download"></i> Забрать заказы из витрины
     </button>
     {% endif %}
 </div>
@@ -201,7 +201,7 @@
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-arrow-repeat"></i> Обновить из витрины</h5>
+        <h5 class="modal-title"><i class="bi bi-cloud-download"></i> Забрать заказы из витрины</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body" id="sync-body">Загружаю…</div>
@@ -491,7 +491,7 @@
               {% if is_admin(request) %}
               <form method="POST" action="/zakupka/{{ zakupka.id }}/pay-push" class="m-0">
                 <button class="btn btn-outline-secondary btn-sm" type="submit"
-                        title="Разом пересчитать всем суммы, доставку и отметки в витрине"><i class="bi bi-arrow-repeat"></i> Обновить витрину</button>
+                        title="Запасная: разом отправить всем девочкам суммы, доставку, отметки оплаты и реквизиты (обычно уходит само)"><i class="bi bi-cloud-upload"></i> Отправить счета девочкам</button>
               </form>
               {% endif %}
             </div>

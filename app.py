@@ -1171,7 +1171,7 @@ def import_vitrina(name: str = Form(...), clear_bills: str = Form("")):
 
 @app.get("/zakupka/{zakupka_id}/sync")
 def sync_preview(zakupka_id: int):
-    """Что изменится при «Обновить из витрины» (ничего не пишет)."""
+    """Что изменится при «Забрать заказы из витрины» (ничего не пишет)."""
     import vitrina_sync
     try:
         data = vitrina_sync.fetch()
@@ -1184,7 +1184,7 @@ def sync_preview(zakupka_id: int):
 
 
 @app.post("/zakupka/{zakupka_id}/sync/apply")
-def sync_apply(zakupka_id: int):
+def sync_apply(zakupka_id: int, background: BackgroundTasks):
     """Применить: берём свежий состав витрины (на момент нажатия) и раскладываем разницу."""
     import vitrina_sync
     try:
@@ -1196,6 +1196,8 @@ def sync_apply(zakupka_id: int):
     vitrina_sync.apply_diff(db, zakupka_id, diff)
     db.commit()
     db.close()
+    if any(diff[k] for k in ("added", "changed", "removed")):
+        background.add_task(_push_invoices_quiet, zakupka_id)   # суммы поменялись — счета девочкам сами
     return JSONResponse({"ok": True, "counts": {k: len(diff[k]) for k in ("added", "changed", "removed", "kept")}})
 
 
@@ -1852,7 +1854,7 @@ def _zakupka_lines_by_phone(db, zakupka_id):
 
 
 @app.post("/dostavka/zakupka/{zakupka_id}/create")
-def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
+def dostavka_create(zakupka_id: int, background: BackgroundTasks, phones: List[str] = Form(default=[])):
     """ШАГ ①: черновики по отмеченным. Яндекс — offers/create (цена);
     СДЭК — локальная пометка (реальный заказ создаётся при подтверждении)."""
     import uuid
@@ -1969,6 +1971,8 @@ def dostavka_create(zakupka_id: int, phones: List[str] = Form(default=[])):
             errors.append(f"{buyer_name}: {e}")
 
     db.close()
+    if created:
+        background.add_task(_push_invoices_quiet, zakupka_id)   # появилась цена доставки — в счета
     parts = [f"Создано черновиков: {created}"]
     if skipped:
         parts.append(f"пропущено (не готовы/уже есть): {skipped}")
@@ -1992,7 +1996,7 @@ def _sync_sheet_tracking(db, phone):
 
 
 @app.post("/dostavka/delivery/{delivery_id}/cancel")
-def dostavka_cancel(delivery_id: int):
+def dostavka_cancel(delivery_id: int, background: BackgroundTasks):
     """Отмена доставки. Черновик (offered) — убираем локально (брони не было).
     Подтверждённая — зовём request/cancel в Яндексе; если статус уже не позволяет,
     показываем ответ Яндекса."""
@@ -2005,6 +2009,7 @@ def dostavka_cancel(delivery_id: int):
         return _op_msg("Доставка не найдена.")
     d = row_to_dict(d)
     zid = d["zakupka_id"]
+    background.add_task(_push_invoices_quiet, zid)   # доставка ушла из счёта — пересчитать девочкам
 
     def _back(msg):
         return RedirectResponse(url=f"/dostavka/zakupka/{zid}?msg={quote(msg)}", status_code=303)
