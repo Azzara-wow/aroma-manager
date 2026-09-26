@@ -1422,7 +1422,7 @@ def dostavka_list(request: Request):
 
 @app.post("/dostavka/origin")
 def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form(""),
-                        carrier: str = Form("yandex")):
+                        carrier: str = Form("yandex"), back: str = Form("")):
     """Сохранить ПВЗ отправления (точка А) для перевозчика в настройки."""
     if carrier == "cdek":
         set_setting("origin_cdek_code", pvz_id.strip())
@@ -1430,6 +1430,9 @@ def dostavka_set_origin(pvz_id: str = Form(""), pvz_address: str = Form(""),
     else:
         set_setting("origin_pvz_id", pvz_id.strip())
         set_setting("origin_pvz_address", pvz_address.strip())
+    import re
+    if re.fullmatch(r"/zakupka/\d+", back or ""):       # выбирали из «⚙️ Настройки» закупки
+        return RedirectResponse(url=back + "#nastroyki", status_code=303)
     return RedirectResponse(url="/dostavka", status_code=303)
 
 

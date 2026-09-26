@@ -87,6 +87,7 @@
 .st-payto{ flex:1 1 180px; max-width:260px; }
 .st-fee{ display:flex; align-items:center; gap:4px; font-size:.8rem; color:#667085; }
 .st-fee input{ width:80px; }
+.st-origin{ display:flex; align-items:center; gap:8px; padding:6px 0; }
 
 /* ---------- Имя: крупно, телефон мелко серым ---------- */
 .who-phone{ color:#9aa3ad; font-size:.78em; font-weight:400; white-space:nowrap; }
@@ -577,12 +578,17 @@
 
         <div class="card shadow-sm mb-3"><div class="card-body">
           <h6 class="mb-2">🚚 Доставка</h6>
-          <div class="small mb-2">ПВЗ отправления:
-            {% if settings_info.origin_yandex %}<div>Яндекс — {{ settings_info.origin_yandex }}</div>{% endif %}
-            {% if settings_info.origin_cdek %}<div>СДЭК — {{ settings_info.origin_cdek }}</div>{% endif %}
-            {% if not settings_info.origin_yandex and not settings_info.origin_cdek %}<div class="text-danger">не задан</div>{% endif %}
-            <a href="/dostavka">изменить →</a>
+          <div class="small fw-semibold mb-1">ПВЗ отправления (куда сдаём посылки)</div>
+          {% for cr, label, addr, cls in [('yandex', 'Яндекс', settings_info.origin_yandex, 'background:#fc0;color:#000'),
+                                          ('cdek', 'СДЭК', settings_info.origin_cdek, '')] %}
+          <div class="st-origin">
+            <span class="badge {{ 'bg-success' if cr == 'cdek' }}" style="{{ cls }}">{{ label }}</span>
+            <span class="flex-grow-1 small {{ '' if addr else 'text-danger' }}">{{ addr or 'не задан' }}</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary js-origin" data-carrier="{{ cr }}"
+                    data-bs-toggle="modal" data-bs-target="#originModal"><i class="bi bi-pencil"></i> Изменить</button>
           </div>
+          {% endfor %}
+          <div class="mb-3"></div>
           <div class="small mb-3">Доставку оплачивает: Яндекс —
             {{ 'покупатель на ПВЗ' if settings_info.paid_by_yandex == 'recipient' else 'мы, покупателю строкой в счёте' }};
             СДЭК — {{ 'покупатель на ПВЗ' if settings_info.paid_by_cdek == 'recipient' else 'мы' }}.</div>
@@ -602,6 +608,33 @@
           </form>
           {% endif %}
         </div></div>
+    <div class="modal fade" id="originModal" tabindex="-1">
+      <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <form class="modal-content" method="POST" action="/dostavka/origin">
+          <div class="modal-header">
+            <h5 class="modal-title">ПВЗ отправления — <span id="origin-carrier-name">Яндекс</span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="back" value="/zakupka/{{ zakupka.id }}">
+            <input type="hidden" name="carrier" id="origin-carrier" value="yandex">
+            <input type="hidden" name="pvz_id" id="origin-id">
+            <input type="hidden" name="pvz_address" id="origin-address">
+            <div class="input-group mb-2">
+              <input class="form-control" id="origin-city" placeholder="Город (напр. Москва)">
+              <button class="btn btn-outline-primary" type="button" id="origin-search-btn"><i class="bi bi-search"></i> Найти</button>
+            </div>
+            <div id="origin-hint" class="small text-muted mb-2">Показываем только пункты, которые принимают посылки.</div>
+            <div id="origin-results" class="list-group" style="max-height:60vh;overflow:auto"></div>
+          </div>
+          <div class="modal-footer">
+            <span id="origin-chosen" class="me-auto small text-success"></span>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+            <button type="submit" class="btn btn-primary" id="origin-save" disabled>Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </div>
     </div>
     {% endif %}
 
@@ -1016,6 +1049,49 @@ function initTabToolbars() {
         applyTab(scope);
     });
 }
+
+// === Настройки: выбор ПВЗ отправления (тот же поиск, что на странице «Доставки») ===
+(function () {
+    const btn = document.getElementById('origin-search-btn');
+    if (!btn) return;
+    const $ = id => document.getElementById(id);
+    document.querySelectorAll('.js-origin').forEach(b => b.addEventListener('click', () => {
+        const cr = b.dataset.carrier || 'yandex';
+        $('origin-carrier').value = cr;
+        $('origin-carrier-name').textContent = cr === 'cdek' ? 'СДЭК' : 'Яндекс';
+        ['origin-id', 'origin-address'].forEach(id => $(id).value = '');
+        $('origin-results').innerHTML = ''; $('origin-chosen').textContent = '';
+        $('origin-save').disabled = true;
+    }));
+    async function search() {
+        const city = $('origin-city').value.trim(), res = $('origin-results'), hint = $('origin-hint');
+        if (!city) { hint.textContent = 'Введите город'; return; }
+        hint.textContent = 'Ищу пункты приёма…'; res.innerHTML = '';
+        try {
+            const d = await (await fetch('/dostavka/pvz?dropoff=1&carrier=' + $('origin-carrier').value +
+                                         '&city=' + encodeURIComponent(city))).json();
+            if (!d.ok) { hint.textContent = 'Ошибка: ' + (d.error || 'неизвестно'); return; }
+            hint.textContent = 'Найдено пунктов приёма: ' + d.count;
+            d.points.forEach(p => {
+                const a = document.createElement('button');
+                a.type = 'button'; a.className = 'list-group-item list-group-item-action';
+                a.innerHTML = '<strong></strong><br><small></small>';
+                a.querySelector('strong').textContent = p.name || 'ПВЗ';
+                a.querySelector('small').textContent = p.address || '';
+                a.addEventListener('click', () => {
+                    $('origin-id').value = p.id; $('origin-address').value = p.address || p.name || '';
+                    $('origin-chosen').textContent = 'Выбран: ' + (p.address || p.name);
+                    $('origin-save').disabled = false;
+                    res.querySelectorAll('.active').forEach(e => e.classList.remove('active'));
+                    a.classList.add('active');
+                });
+                res.appendChild(a);
+            });
+        } catch (e) { hint.textContent = 'Сбой запроса'; }
+    }
+    btn.addEventListener('click', search);
+    $('origin-city').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+})();
 
 // === Оплата: фильтры-чипы и счётчики (галочку «оплачено» сохраняет общий обработчик) ===
 (function () {
