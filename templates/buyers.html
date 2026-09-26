@@ -31,10 +31,23 @@
 <div class="card shadow-sm">
     <div class="card-body">
         {% if buyers %}
+        <form method="POST" action="/buyers/delete-bulk" id="bulk-form" class="d-flex flex-wrap gap-2 align-items-center mb-3"
+              onsubmit="return bulkConfirm()">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="mark-nophone"
+                    title="Отметить всех, у кого имя не в формате «79001234567 - Имя»">
+                ☑ Отметить всех без телефона в имени
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="mark-none">Снять отметки</button>
+            <button type="submit" class="btn btn-sm btn-danger" id="bulk-del" disabled>
+                <i class="bi bi-trash"></i> Удалить отмеченные (<span id="bulk-n">0</span>)
+            </button>
+            <span class="small text-muted">Тех, кто есть в активной закупке, не удалит. Позиции закупок не пострадают.</span>
+        </form>
         <div class="table-responsive">
             <table class="table table-hover">
                 <thead>
                     <tr>
+                        <th style="width:32px"></th>
                         <th>Имя</th>
                         <th>Телефон (личность)</th>
                         <th>Отчество</th>
@@ -44,7 +57,9 @@
                 </thead>
                 <tbody>
                     {% for buyer in buyers %}
-                    <tr>
+                    <tr id="b-{{ buyer.id }}">
+                        <td><input type="checkbox" class="form-check-input bulk-cb" value="{{ buyer.id }}"
+                                   data-name="{{ buyer.name }}"></td>
                         <td><strong>{{ buyer.name }}</strong></td>
                         <td>
                             {% if buyer.linked_phone %}
@@ -75,8 +90,7 @@
                                  Раньше тут была <a href="/buyers/delete/..">, и боты/прелоадеры
                                  дёргали её GET-запросом, молча удаляя покупателей. Теперь только POST. -->
                             <form method="POST" action="/buyers/delete/{{ buyer.id }}"
-                                  style="display:inline"
-                                  onsubmit="return confirm('Удалить покупателя {{ buyer.name }}?')">
+                                  style="display:inline" class="del-one" data-name="{{ buyer.name }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger">
                                     <i class="bi bi-trash"></i>
                                 </button>
@@ -201,6 +215,52 @@
 
 {% block scripts %}
 <script>
+// --- массовое удаление: отметить без телефона в имени → удалить разом ---
+(function () {
+  const form = document.getElementById('bulk-form');
+  if (!form) return;
+  const cbs = () => Array.from(document.querySelectorAll('.bulk-cb'));
+  const PHONE_NAME = /^7\d{10}\s*-\s*\S/;
+  function refresh() {
+    const n = cbs().filter(c => c.checked).length;
+    document.getElementById('bulk-n').textContent = n;
+    document.getElementById('bulk-del').disabled = !n;
+  }
+  document.getElementById('mark-nophone').addEventListener('click', function () {
+    cbs().forEach(c => { c.checked = !PHONE_NAME.test(c.dataset.name.trim()); });
+    refresh();
+  });
+  document.getElementById('mark-none').addEventListener('click', function () {
+    cbs().forEach(c => { c.checked = false; }); refresh();
+  });
+  document.addEventListener('change', e => { if (e.target.classList.contains('bulk-cb')) refresh(); });
+  window.bulkConfirm = function () {
+    const picked = cbs().filter(c => c.checked);
+    if (!picked.length) return false;
+    if (!confirm('Удалить отмеченных: ' + picked.length + '?\n\n' +
+                 picked.slice(0, 12).map(c => '• ' + c.dataset.name).join('\n') +
+                 (picked.length > 12 ? '\n…и ещё ' + (picked.length - 12) : ''))) return false;
+    form.querySelectorAll('input[name=ids]').forEach(i => i.remove());
+    picked.forEach(c => {
+      const i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'ids'; i.value = c.value; form.appendChild(i);
+    });
+    return true;
+  };
+  // одиночное удаление — без перезагрузки: строка исчезает, прокрутка остаётся
+  document.querySelectorAll('form.del-one').forEach(function (f) {
+    f.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Удалить покупателя ' + f.dataset.name + '?')) return;
+      try {
+        const r = await fetch(f.action, { method: 'POST' });
+        if (r.ok) { const tr = f.closest('tr'); if (tr) tr.remove(); refresh(); }
+        else alert('Не удалось удалить');
+      } catch (err) { alert('Сбой сети'); }
+    });
+  });
+})();
+
 document.querySelectorAll('.js-link').forEach(function (b) {
   b.addEventListener('click', function () {
     document.getElementById('link-id').value = b.dataset.id || '';

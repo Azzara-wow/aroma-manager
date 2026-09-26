@@ -280,6 +280,27 @@ def set_pay_fields_bulk(updates, clear_others=False):
     return {"ok": True, "updated": len(present), "not_found": not_found}
 
 
+def set_pay_row(phone_raw, fields):
+    """Счёт ОДНОГО покупателя: пишем только его строку Q:U (поля, которых нет в fields,
+    остаются как были). Быстрые правки по разным девочкам не затирают друг друга."""
+    canon = normalize_phone(phone_raw)
+    ws = _ws()
+    if ws.col_count < COL_PAY_TO + 1:
+        ws.add_cols(COL_PAY_TO + 1 - ws.col_count)
+        ws.update(range_name=f"{_col_a1(COL_PAY_LINK)}1:{_col_a1(COL_PAY_TO)}1", values=[PAY_HEADERS])
+    values = ws.get_all_values()
+    idx = _find_row(values, canon)
+    if idx is None:
+        return {"ok": False, "reason": "not_found"}
+    cur = {f: _cell(values[idx], col) for f, col in _PAY_FIELDS.items()}
+    for f, v in (fields or {}).items():
+        if f in cur:
+            cur[f] = "" if v is None else str(v)
+    rng = f"{_col_a1(COL_PAY_LINK)}{idx + 1}:{_col_a1(COL_PAY_TO)}{idx + 1}"
+    ws.update(range_name=rng, values=[[cur["link"], cur["amount"], cur["delivery"], cur["paid"], cur["payto"]]])
+    return {"ok": True}
+
+
 def set_paid(phone_raw, paid):
     """Отметка оплаты одного покупателя (колонка T) — покупатель сразу видит в витрине.
     Пишем ОДНУ ячейку, чтобы быстрые клики по разным покупателям не затирали друг друга."""

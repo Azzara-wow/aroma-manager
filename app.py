@@ -454,6 +454,35 @@ def _vitrina_invoices(zakupka_id):
     return inv
 
 
+def _sheet_fields(it):
+    """Поля счёта для листа «Покупатели» (без ссылки — её решает вызывающий)."""
+    import billing
+    return {"amount": it["total"], "delivery": it["delivery"] or "",
+            "paid": buyers_sheet.PAID_MARK if it["paid"] else "",
+            # реквизиты перевода — только тем, кто платит на карту
+            "payto": it["payto"] if it["method"] == billing.METHOD_CARD else ""}
+
+
+def _push_one(zakupka_id, buyer):
+    """Сразу отправить в витрину счёт ОДНОЙ девочки (после смены способа, реквизитов,
+    доставки) — как галочка «оплачено». Сумма заказа — из витрины. Ошибки — в лог."""
+    import billing
+    try:
+        inv = _vitrina_invoices(zakupka_id)
+        db = get_db()
+        phone = billing.phone_of(buyer, billing.phone_by_name_map(db))
+        db.close()
+        it = next((i for i in inv if i["buyer"] == buyer or (phone and i["phone"] == phone)), None)
+        if not it or not it["phone"]:
+            return
+        u = _sheet_fields(it)
+        if it["method"] == billing.METHOD_CARD:
+            u["link"] = ""          # на карту — ссылки нет; по ссылке — ссылку не трогаем
+        buyers_sheet.set_pay_row(it["phone"], u)
+    except Exception as e:
+        print(f"[счёт→витрина] {buyer}: {e}")
+
+
 def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
     """Отправить счета закупки в витрину (лист «Покупатели», Q:T): итого, доставка,
     честная отметка оплаты; ссылки — из links, у clear_links ссылка стирается."""
@@ -465,10 +494,7 @@ def _push_invoices(zakupka_id, links=None, clear_links=(), inv=None):
     for it in inv:
         if not it["phone"]:
             continue
-        u = {"amount": it["total"], "delivery": it["delivery"] or "",
-             "paid": buyers_sheet.PAID_MARK if it["paid"] else "",
-             # реквизиты перевода — только тем, кто платит на карту
-             "payto": it["payto"] if it["method"] == billing.METHOD_CARD else ""}
+        u = _sheet_fields(it)
         if it["phone"] in links:
             u["link"] = links[it["phone"]]
         elif it["phone"] in clear_links or it["method"] == billing.METHOD_CARD:
@@ -568,7 +594,8 @@ def pay_push(zakupka_id: int):
 
 
 @app.post("/api/billing/{zakupka_id}")
-def api_billing(zakupka_id: int, buyer: str = Form(...), field: str = Form(...), value: str = Form("")):
+def api_billing(zakupka_id: int, background: BackgroundTasks, buyer: str = Form(...),
+                field: str = Form(...), value: str = Form("")):
     """Ручные поля счёта: field=delivery (₽, пусто — цена Яндекса) | payto (реквизиты)."""
     import billing
     v = (value or "").strip()
@@ -586,14 +613,16 @@ def api_billing(zakupka_id: int, buyer: str = Form(...), field: str = Form(...),
     db = get_db()
     inv = next((i for i in billing.invoices(db, zakupka_id) if i["buyer"] == buyer), None)
     db.close()
+    background.add_task(_push_one, zakupka_id, buyer)     # девочка видит сразу
     return {"ok": True, "delivery": inv["delivery"] if inv else 0, "total": inv["total"] if inv else 0}
 
 
 @app.post("/api/paymethod/{zakupka_id}")
-def api_paymethod(zakupka_id: int, buyer: str = Form(...), method: str = Form(...)):
-    """Способ оплаты покупателя: link | card (разметка, не факт оплаты)."""
+def api_paymethod(zakupka_id: int, background: BackgroundTasks, buyer: str = Form(...), method: str = Form(...)):
+    """Способ оплаты покупателя: link | card (разметка, не факт оплаты). Сразу в витрину."""
     import billing
     billing.set_method(zakupka_id, buyer, method)
+    background.add_task(_push_one, zakupka_id, buyer)
     return {"ok": True, "method": billing.get_method(zakupka_id, buyer)}
 
 
@@ -780,6 +809,7 @@ def toggle_payment_zakupka(buyer_name: str, background: BackgroundTasks, zakupka
 
         db.commit()
         background.add_task(_sheet_paid, buyer_name, bool(new_val))
+        background.add_task(_push_one, zakupka_id, buyer_name)   # и сам счёт, если ещё не выставлен
 
     db.close()
     return {"ok": True, "new_value": new_val}
@@ -1118,6 +1148,33 @@ async def edit_buyer(
     db.commit()
     db.close()
     return RedirectResponse(url="/buyers", status_code=303)
+
+
+@app.post("/buyers/delete-bulk")
+def delete_buyers_bulk(ids: List[int] = Form(default=[])):
+    """Удалить отмеченных покупателей разом. Тех, кто есть в АКТИВНОЙ закупке, не трогаем.
+    Позиции закупок не удаляются — там имя хранится текстом."""
+    from urllib.parse import quote
+    db = get_db()
+    active = {r["buyer_name"] for r in db.execute(
+        "SELECT DISTINCT zi.buyer_name FROM zakaz_items zi JOIN zakupkas z ON z.id = zi.zakupka_id "
+        "WHERE z.status = 'active'").fetchall()}
+    deleted, kept = 0, 0
+    for bid in set(ids):
+        row = db.execute("SELECT name FROM buyers WHERE id = ?", (bid,)).fetchone()
+        if not row:
+            continue
+        if row["name"] in active:
+            kept += 1
+            continue
+        db.execute("DELETE FROM buyers WHERE id = ?", (bid,))
+        deleted += 1
+    db.commit()
+    db.close()
+    msg = f"Удалено: {deleted}."
+    if kept:
+        msg += f" Не тронуты (есть в активной закупке): {kept}."
+    return RedirectResponse(url=f"/buyers?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/buyers/delete/{buyer_id}")
