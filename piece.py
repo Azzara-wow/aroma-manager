@@ -1,4 +1,5 @@
-# piece.py — штучные товары закупки (База для парфюма, ММБ): не разливаются, едут бутылкой.
+# piece.py — штучные товары закупки (База для парфюма, ММБ): разливаются из канистры
+# в бутылки и едут бутылкой (не флаконами); заказ — в штуках.
 #
 # В витрине это категория «База» (core.PIECE_CATEGORIES) — заказ в штуках, поэтому в
 # zakaz_items.volume_ml у таких позиций лежит КОЛИЧЕСТВО ШТУК, а не миллилитры.
@@ -6,13 +7,15 @@
 # старых и ручных позиций — по названию (looks_piece).
 #
 # Вес 1 шт: вписанный организатором (settings «pieceweight:<название>»), иначе
-# оценка по названию: литры × 1000 г + бутылка (1 л → 1100 г, 0,5 л → 560 г).
+# оценка по названию: литры × 790 г (спиртовая база легче воды) + пустая бутылка
+# (60 г для ≥1 л, 40 г меньше): 1 л → 850 г, 0,5 л → 435 г.
 
 import re
 
 from models import get_setting, set_setting
 
 _PIECE_PREFIXES = ("база", "ммб")
+BASE_DENSITY = 0.79   # г/мл — спиртовая база (Елена: ~790 г в литре)
 
 
 def looks_piece(name):
@@ -30,9 +33,9 @@ def default_weight_g(name):
             liters = v
             break
     if liters is None:
-        return 1100
-    bottle = 100 if liters >= 1 else 60
-    return int(round(liters * 1000 + bottle))
+        return 850
+    bottle = 60 if liters >= 1 else 40
+    return int(round(liters * BASE_DENSITY * 1000 + bottle))
 
 
 def _key(name):

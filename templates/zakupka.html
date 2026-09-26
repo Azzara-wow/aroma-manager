@@ -279,7 +279,11 @@
                         <button type="button" class="m-head">
                             <span class="m-dot"></span>
                             <span class="m-title">{{ aroma }}</span>
+                            {% if gitems[0].is_piece %}
+                            <span class="m-meta">{{ gitems|sum(attribute='volume_ml') }} бут. · {{ gitems|length }} зак.</span>
+                            {% else %}
                             <span class="m-meta">{{ gitems|sum(attribute='volume_ml') }} мл · {{ gitems|length }} шт</span>
+                            {% endif %}
                             <span class="m-badge">{{ gdone }}/{{ gitems|length }}</span>
                             <span class="m-chev">▾</span>
                         </button>
@@ -287,7 +291,7 @@
                             {% for it in gitems %}
                             <label class="m-row {% if it.rozliv == 1 %}m-row-done{% endif %}">
                                 <span class="m-row-name">{{ who(it.buyer_name) }}</span>
-                                <span class="m-row-vol">{{ it.volume_ml }} мл</span>
+                                <span class="m-row-vol">{{ it.volume_ml }} {{ 'шт' if it.is_piece else 'мл' }}</span>
                                 <input type="checkbox" class="m-check" data-kind="rozliv"
                                        data-item-id="{{ it.id }}" {% if it.rozliv == 1 %}checked{% endif %}>
                             </label>

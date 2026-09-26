@@ -35,7 +35,7 @@
   <summary class="card-body py-2 small">⚖️ <b>Вес штучных товаров</b> (база едет бутылкой, не флаконами):
     {% for p in piece_items %}{{ p.name }} — {{ p.manual or p.auto }} г{% if not loop.last %}; {% endif %}{% endfor %}</summary>
   <form method="POST" action="/dostavka/zakupka/{{ zakupka.id }}/piece-weight" class="card-body pt-0">
-    <div class="small text-muted mb-2">Вес ОДНОЙ штуки с бутылкой, в граммах. Пусто — оценка по названию (1 л ≈ 1100 г).</div>
+    <div class="small text-muted mb-2">Вес ОДНОЙ штуки с бутылкой, в граммах. Пусто — оценка по названию: 790 г на литр + бутылка (1 л ≈ 850 г, 0,5 л ≈ 435 г).</div>
     {% for p in piece_items %}
     <div class="d-flex align-items-center gap-2 mb-2">
       <input type="hidden" name="name" value="{{ p.name }}">

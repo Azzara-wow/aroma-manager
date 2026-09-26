@@ -211,10 +211,11 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             zi.buyer_name, 
             zi.aroma_name, 
             zi.volume_ml,
-            s.rozliv
+            s.rozliv,
+            COALESCE(zi.is_piece, 0) as is_piece
         FROM zakaz_items zi
         JOIN statuses s ON s.zakaz_item_id = zi.id
-        WHERE zi.zakupka_id = ? AND COALESCE(zi.is_piece, 0) = 0
+        WHERE zi.zakupka_id = ?
         ORDER BY zi.aroma_name, zi.buyer_name
     """, (zakupka_id,)).fetchall()
 
@@ -233,7 +234,7 @@ async def view_zakupka(request: Request, zakupka_id: int, paymsg: str = ""):
             zi.volume_ml,
             'закупка' as source,
             s.upakovka,
-            CASE WHEN COALESCE(zi.is_piece, 0) = 1 THEN 1 ELSE s.rozliv END as rozliv,
+            s.rozliv,
             COALESCE(zi.is_piece, 0) as is_piece
         FROM zakaz_items zi
         JOIN statuses s ON s.zakaz_item_id = zi.id
@@ -668,8 +669,8 @@ def rozliv_export(zakupka_id: int):
         db.close()
         raise HTTPException(status_code=404, detail="Закупка не найдена")
     rows = db.execute(
-        "SELECT aroma_name, SUM(volume_ml) AS total, COUNT(*) AS cnt "
-        "FROM zakaz_items WHERE zakupka_id = ? AND COALESCE(is_piece, 0) = 0 "
+        "SELECT aroma_name, SUM(volume_ml) AS total, COUNT(*) AS cnt, MAX(COALESCE(is_piece, 0)) AS piece "
+        "FROM zakaz_items WHERE zakupka_id = ? "
         "GROUP BY aroma_name ORDER BY aroma_name",
         (zakupka_id,),
     ).fetchall()
@@ -679,7 +680,7 @@ def rozliv_export(zakupka_id: int):
     ws.title = "Реестр розлива"
     _xlsx_header(ws, ["Наименование", "Общее количество, мл", "Позиций"], [36, 22, 10])
     for r in rows:
-        ws.append([r["aroma_name"], r["total"] or 0, r["cnt"]])
+        ws.append([r["aroma_name"], f"{r['total'] or 0} шт" if r["piece"] else (r["total"] or 0), r["cnt"]])
         for c in ws[ws.max_row]:
             c.border = ws._thin_border
     return _xlsx_response(wb, f"reestr_rozliv_{zakupka_id}.xlsx")
@@ -1364,8 +1365,7 @@ def _ship_readiness(db, zakupka_id):
     всё упаковано (закупка + наличие), оплачено (закупка; наличие — если оно есть)."""
     out = {}
     for r in db.execute(
-        "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 AND COALESCE(zi.is_piece,0)=0 "
-        "THEN 1 ELSE 0 END) AS pour, "
+        "SELECT zi.buyer_name, SUM(CASE WHEN COALESCE(s.rozliv,0)=0 THEN 1 ELSE 0 END) AS pour, "
         "SUM(CASE WHEN COALESCE(s.upakovka,0)=0 THEN 1 ELSE 0 END) AS pack, "
         "MAX(COALESCE(s.payment_zakupka,0)) AS paid "
         "FROM zakaz_items zi LEFT JOIN statuses s ON s.zakaz_item_id = zi.id "
